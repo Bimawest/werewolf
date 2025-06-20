@@ -168,7 +168,7 @@ document.addEventListener('DOMContentLoaded', () => {
         // IMPORTANT: Change this URL to your ngrok URL or deployed server URL when in production!
         // For local development, use 'http://localhost:3000'.
         // If deployed to a cloud platform, use its public URL.
-        socket = io('https://007a-182-3-141-160.ngrok-free.app'); // Sesuaikan dengan port server Anda
+        socket = io('http://localhost:3000'); // Sesuaikan dengan port server Anda
 
         // Initialize display for Multiplayer
         mpPlayerSetupScreen.style.display = 'none';
