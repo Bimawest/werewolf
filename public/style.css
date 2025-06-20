@@ -6,6 +6,7 @@ body {
     align-items: center;
     min-height: 100vh;
     margin: 0;
+    box-sizing: border-box; /* Add this for consistent sizing */
 }
 
 .container {
@@ -16,6 +17,7 @@ body {
     width: 90%;
     max-width: 800px;
     text-align: center;
+    margin: 20px 0; /* Add vertical margin for small screens */
 }
 
 h1, h2, h3 {
@@ -36,17 +38,19 @@ label {
     margin-bottom: 8px;
     font-weight: bold;
     color: #555;
+    text-align: left; /* Align labels to the left */
 }
 
 input[type="number"],
 input[type="text"],
 select {
-    width: calc(100% - 20px);
+    width: calc(100% - 22px); /* Adjust for 10px padding + 1px border on each side */
     padding: 10px;
     margin-bottom: 15px;
     border: 1px solid #ddd;
     border-radius: 4px;
     font-size: 16px;
+    box-sizing: border-box; /* Ensure padding/border are inside width */
 }
 
 button {
@@ -65,6 +69,12 @@ button:hover {
     background-color: #0056b3;
 }
 
+button:focus {
+    outline: none;
+    box-shadow: 0 0 0 3px rgba(0, 123, 255, 0.25);
+}
+
+
 /* Specific styles for player setup items */
 #sp-player-type-selection div.player-setup-item,
 #mp-player-setup-screen div.player-setup-item {
@@ -73,17 +83,32 @@ button:hover {
     border: 1px solid #eee;
     border-radius: 4px;
     background-color: #f9f9f9;
+    text-align: left; /* Ensure content inside is left-aligned */
 }
+#sp-player-type-selection div.player-setup-item input,
+#sp-player-type-selection div.player-setup-item select {
+    width: auto; /* Allow auto width for player setup inputs/selects */
+    display: inline-block; /* Place them inline */
+    margin-right: 10px;
+    margin-bottom: 0;
+}
+#sp-player-type-selection div.player-setup-item label {
+    display: inline-block;
+    margin-right: 10px;
+    width: 100px; /* Give labels a fixed width for alignment */
+}
+
 
 #player-list ul,
 #mp-players-in-room-ul {
     list-style: none;
     padding: 0;
-    max-height: 200px;
+    max-height: 250px; /* Increased height for more players */
     overflow-y: auto;
     border: 1px solid #eee;
     border-radius: 4px;
     margin-top: 15px;
+    text-align: left; /* Align list items to left */
 }
 
 #player-list li,
@@ -102,11 +127,29 @@ button:hover {
 
 .player-name {
     font-weight: bold;
+    flex-grow: 1; /* Allow name to take available space */
 }
 
 .player-status {
     font-style: italic;
     color: #777;
+    margin-left: 10px; /* Spacing */
+}
+
+/* Style for dead players */
+#players-ul li.dead,
+#mp-players-in-room-ul li.dead {
+    text-decoration: line-through;
+    color: #aaa;
+    background-color: #f8d7da; /* Light red background for dead */
+}
+
+/* Style for the current player in the player list */
+#players-ul li.is-me,
+#mp-players-in-room-ul li.is-me {
+    background-color: #e6f7ff; /* Light blue background */
+    border-left: 5px solid #007bff; /* Blue left border */
+    font-weight: bold;
 }
 
 #chat-messages {
@@ -122,14 +165,30 @@ button:hover {
 
 .chat-message {
     margin-bottom: 8px;
+    line-height: 1.4;
 }
 
 .chat-message strong {
     color: #007bff;
 }
+.chat-message span[style*="color: #666"] { /* For system messages */
+    font-style: italic;
+}
 
+#action-buttons {
+    margin-top: 20px;
+    padding: 15px;
+    background-color: #e9ecef;
+    border-radius: 8px;
+}
+#action-buttons h4 {
+    margin-top: 0;
+    margin-bottom: 15px;
+    color: #333;
+}
 #action-buttons button {
     margin: 5px;
+    min-width: 120px; /* Ensure buttons have minimum width */
 }
 
 .disabled-button {
@@ -140,13 +199,13 @@ button:hover {
 /* Modal Styles */
 .modal {
     position: fixed; /* Stay in place */
-    z-index: 1; /* Sit on top */
+    z-index: 1000; /* Sit on top, higher than other content */
     left: 0;
     top: 0;
     width: 100%; /* Full width */
     height: 100%; /* Full height */
     overflow: auto; /* Enable scroll if needed */
-    background-color: rgba(0,0,0,0.4); /* Black w/ opacity */
+    background-color: rgba(0,0,0,0.6); /* Black w/ more opacity */
     display: flex; /* Use flexbox for centering */
     justify-content: center;
     align-items: center;
@@ -154,18 +213,19 @@ button:hover {
 
 .modal-content {
     background-color: #fefefe;
-    padding: 20px;
+    padding: 25px;
     border: 1px solid #888;
     width: 80%;
-    max-width: 400px;
+    max-width: 450px; /* Slightly larger max-width */
     border-radius: 8px;
-    box-shadow: 0 4px 8px rgba(0,0,0,0.2);
+    box-shadow: 0 5px 15px rgba(0,0,0,0.3);
     text-align: left; /* Align text within the modal content */
 }
 
 .modal-content h3 {
     text-align: center;
     margin-top: 0;
+    margin-bottom: 20px;
     color: #333;
 }
 
@@ -187,4 +247,38 @@ button:hover {
     width: auto;
     padding: 10px 15px;
     margin: 5px;
+}
+
+/* Role and Keyword display */
+#your-role strong {
+    display: block; /* Ensures the keyword appears on a new line */
+    margin-top: 5px; /* Spacing between role and keyword */
+    font-size: 0.9em;
+    color: #007bff; /* Or any distinct color */
+}
+
+/* Responsive adjustments */
+@media (max-width: 600px) {
+    .container {
+        padding: 15px;
+    }
+    input[type="number"],
+    input[type="text"],
+    select,
+    button {
+        font-size: 14px;
+        padding: 10px;
+    }
+    #action-buttons button {
+        width: 100%; /* Full width buttons on small screens */
+        margin: 5px 0;
+    }
+    #sp-player-type-selection div.player-setup-item label,
+    #sp-player-type-selection div.player-setup-item input,
+    #sp-player-type-selection div.player-setup-item select {
+        display: block; /* Stack on small screens */
+        width: calc(100% - 22px); /* Make inputs full width */
+        margin-right: 0;
+        margin-bottom: 8px;
+    }
 }
