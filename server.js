@@ -1,4 +1,3 @@
-// server.js
 const express = require('express');
 const http = require('http');
 const socketIo = require('socket.io');
@@ -10,528 +9,700 @@ const io = socketIo(server);
 
 const PORT = process.env.PORT || 3000;
 
-// Serve static files from the 'public' directory
+// Serve static files (index.html, style.css, script.js)
 app.use(express.static(path.join(__dirname, 'public')));
 
-// --- Game State (di Server) ---
-let rooms = {}; // Struktur untuk menyimpan game state per ruangan
+// Store game rooms and their states
+const rooms = {}; // Structure: { 'ROOMCODE': { hostSocketId: '...', players: [], gameState: {} } }
 
+// Game configuration (roles based on player count)
+const GAME_ROLES = {
+    '3-5': ['Werewolf', 'Villager', 'Villager', 'Doctor', 'Seer'], // Min 3, max 5. Roles added up to 5 players.
+    '6-10': ['Werewolf', 'Werewolf', 'Villager', 'Villager', 'Villager', 'Doctor', 'Seer', 'Villager', 'Werewolf', 'Villager'], // Roles added up to 10 players.
+    'default': ['Werewolf', 'Villager'] // Base roles, will be expanded
+};
+
+// Helper function to generate a random room code
+function generateRoomCode() {
+    let code;
+    do {
+        code = Math.random().toString(36).substring(2, 6).toUpperCase();
+    } while (rooms[code]); // Ensure unique code
+    return code;
+}
+
+// Helper function to shuffle an array
+function shuffleArray(array) {
+    for (let i = array.length - 1; i > 0; i--) {
+        const j = Math.floor(Math.random() * (i + 1));
+        [array[i], array[j]] = [array[j], array[i]];
+    }
+    return array;
+}
+
+// Helper to get public player info
+function getPublicPlayers(roomCode) {
+    if (!rooms[roomCode]) return [];
+    return rooms[roomCode].players.map(p => ({
+        id: p.id,
+        name: p.name,
+        type: p.type, // 'human' or 'computer'
+        isAlive: p.isAlive,
+        socketId: p.socketId // Include socketId for lobby display
+    }));
+}
+
+// --- Game Logic Functions ---
+
+function assignRoles(roomCode) {
+    const room = rooms[roomCode];
+    if (!room) return;
+
+    const numPlayers = room.players.length;
+    let rolesToAssign = [];
+
+    if (numPlayers >= 3 && numPlayers <= 5) {
+        rolesToAssign = ['Werewolf', 'Villager', 'Villager'];
+        if (numPlayers >= 4) rolesToAssign.push('Doctor');
+        if (numPlayers === 5) rolesToAssign.push('Seer');
+    } else if (numPlayers >= 6 && numPlayers <= 10) {
+        rolesToAssign = ['Werewolf', 'Werewolf', 'Villager', 'Villager', 'Villager', 'Doctor', 'Seer'];
+        if (numPlayers >= 8) rolesToAssign.push('Villager');
+        if (numPlayers >= 9) rolesToAssign.push('Werewolf');
+        if (numPlayers === 10) rolesToAssign.push('Villager');
+    } else if (numPlayers > 10) { // For larger games, scale roles
+        let numWerewolves = Math.floor(numPlayers / 4);
+        if (numWerewolves < 2) numWerewolves = 2; // At least 2 werewolves
+        for (let i = 0; i < numWerewolves; i++) rolesToAssign.push('Werewolf');
+        rolesToAssign.push('Doctor', 'Seer');
+        while (rolesToAssign.length < numPlayers) {
+            rolesToAssign.push('Villager');
+        }
+    } else { // Fallback for less than 3 players (should be prevented by client/host)
+        console.warn(`Attempted to assign roles for ${numPlayers} players in room ${roomCode}. Min 3 required.`);
+        return;
+    }
+
+    rolesToAssign = shuffleArray(rolesToAssign);
+
+    room.players.forEach((player, index) => {
+        player.role = rolesToAssign[index];
+        // Send individual role to each player
+        if (player.type === 'human' && player.socketId) {
+            io.to(player.socketId).emit('yourRole', player.role);
+            if (player.role === 'Werewolf') {
+                const werewolfBuddies = room.players
+                    .filter(p => p.role === 'Werewolf' && p.id !== player.id && p.isAlive)
+                    .map(p => p.name);
+                io.to(player.socketId).emit('werewolfBuddies', werewolfBuddies);
+            }
+        }
+    });
+
+    room.gameState.rolesAssigned = true;
+    console.log(`Roles assigned for room ${roomCode}:`, room.players.map(p => ({ name: p.name, role: p.role })));
+    addSystemMessage(roomCode, 'Peran telah dibagikan. Selamat bermain!');
+}
+
+function startGame(roomCode) {
+    const room = rooms[roomCode];
+    if (!room) return;
+
+    // Reset game state
+    room.gameState = {
+        phase: 'night', // Start at night (Werewolves act first)
+        dayNum: 0,
+        votes: {}, // {playerId: count} for lynching
+        werewolfKillTarget: null,
+        doctorProtectTarget: null,
+        seerRevealTarget: null,
+        actionsTaken: {}, // {socketId: {werewolf: true, doctor: true, seer: true}}
+        deadPlayersQueue: [], // Players to be announced dead
+        rolesAssigned: false
+    };
+
+    // Reset players state
+    room.players.forEach(p => {
+        p.isAlive = true;
+        p.hasVoted = false; // Reset voting status for new game
+        p.actionChosen = false; // Reset action status
+        p.voteTarget = null; // Clear previous vote targets
+    });
+
+    assignRoles(roomCode);
+
+    if (!room.gameState.rolesAssigned) {
+        addSystemMessage(roomCode, 'Gagal memulai game: penugasan peran tidak berhasil.');
+        return;
+    }
+
+    io.to(roomCode).emit('gameStarted');
+    addSystemMessage(roomCode, 'Game dimulai! Selamat datang di desa Werewolf.');
+    startNightPhase(roomCode);
+}
+
+function startDayPhase(roomCode) {
+    const room = rooms[roomCode];
+    if (!room) return;
+
+    room.gameState.phase = 'day';
+    room.gameState.dayNum++;
+    room.gameState.votes = {}; // Reset votes for new day
+    room.players.forEach(p => {
+        p.hasVoted = false;
+        p.actionChosen = false;
+    });
+
+    // Announce night's casualties if any
+    if (room.gameState.deadPlayersQueue.length > 0) {
+        room.gameState.deadPlayersQueue.forEach(deadPlayer => {
+            addSystemMessage(roomCode, `Malam ini, **${deadPlayer.name}** dimangsa oleh Werewolf. Perannya adalah **${deadPlayer.role}**.`);
+        });
+        room.gameState.deadPlayersQueue = []; // Clear queue
+    } else {
+        addSystemMessage(roomCode, 'Tidak ada yang dimangsa malam ini.');
+    }
+
+    io.to(roomCode).emit('updatePlayerList', getPublicPlayers(roomCode)); // Update list after deaths
+    checkGameEnd(roomCode);
+
+    if (room.gameState.phase === 'day') { // If game not over
+        addSystemMessage(roomCode, `Ini adalah Siang Hari ke-${room.gameState.dayNum}. Diskusikan siapa yang mencurigakan!`);
+        io.to(roomCode).emit('updateGamePhase', `Siang Hari ke-${room.gameState.dayNum} (Diskusi & Voting)`);
+
+        const alivePlayers = room.players.filter(p => p.isAlive);
+        io.to(roomCode).emit('requestVote', alivePlayers.map(p => ({ id: p.id, name: p.name })));
+
+        // Handle computer player votes for day phase
+        setTimeout(() => {
+            processComputerVotes(roomCode);
+            resolveDayVote(roomCode);
+        }, 10000); // Give 10 seconds for human players to vote, then computers vote
+    }
+}
+
+function processComputerVotes(roomCode) {
+    const room = rooms[roomCode];
+    if (!room) return;
+
+    const aliveComputerPlayers = room.players.filter(p => p.isAlive && p.type === 'computer' && !p.hasVoted);
+
+    aliveComputerPlayers.forEach(computerPlayer => {
+        let targetPlayer = null;
+        const eligibleTargets = room.players.filter(p => p.isAlive && p.id !== computerPlayer.id);
+
+        if (eligibleTargets.length === 0) return;
+
+        // Simple AI for computer voting
+        if (computerPlayer.role === 'Werewolf') {
+            const nonWerewolfTargets = eligibleTargets.filter(p => p.role !== 'Werewolf');
+            targetPlayer = nonWerewolfTargets.length > 0 ? nonWerewolfTargets[Math.floor(Math.random() * nonWerewolfTargets.length)] : eligibleTargets[Math.floor(Math.random() * eligibleTargets.length)];
+        } else { // Villager, Doctor, Seer (try to target werewolves)
+            const werewolfTargets = eligibleTargets.filter(p => p.role === 'Werewolf');
+            targetPlayer = werewolfTargets.length > 0 ? werewolfTargets[Math.floor(Math.random() * werewolfTargets.length)] : eligibleTargets[Math.floor(Math.random() * eligibleTargets.length)];
+        }
+
+        if (targetPlayer) {
+            if (room.gameState.votes[targetPlayer.id]) {
+                room.gameState.votes[targetPlayer.id]++;
+            } else {
+                room.gameState.votes[targetPlayer.id] = 1;
+            }
+            computerPlayer.hasVoted = true;
+            addSystemMessage(roomCode, `${computerPlayer.name} (Komputer) memilih untuk menggantung ${targetPlayer.name}.`);
+        }
+    });
+}
+
+function resolveDayVote(roomCode) {
+    const room = rooms[roomCode];
+    if (!room) return;
+
+    let maxVotes = 0;
+    let playersToHang = [];
+
+    const allHumanVoted = room.players.filter(p => p.isAlive && p.type === 'human').every(p => p.hasVoted);
+
+    if (!allHumanVoted) {
+        addSystemMessage(roomCode, 'Tidak semua pemain manusia selesai voting. Menunggu...');
+        // Set a timeout to re-check or force resolution after a longer period if needed
+        return;
+    }
+
+    if (Object.keys(room.gameState.votes).length === 0) {
+        addSystemMessage(roomCode, 'Tidak ada yang digantung hari ini karena tidak ada suara.');
+        setTimeout(() => startNightPhase(roomCode), 3000);
+        return;
+    }
+
+    for (const targetId in room.gameState.votes) {
+        if (room.gameState.votes[targetId] > maxVotes) {
+            maxVotes = room.gameState.votes[targetId];
+            playersToHang = [parseInt(targetId)];
+        } else if (room.gameState.votes[targetId] === maxVotes) {
+            playersToHang.push(parseInt(targetId));
+        }
+    }
+
+    if (playersToHang.length === 1) {
+        const hungPlayer = room.players.find(p => p.id === playersToHang[0]);
+        if (hungPlayer) {
+            hungPlayer.isAlive = false;
+            addSystemMessage(roomCode, `Desa telah menggantung **${hungPlayer.name}**. Perannya adalah **${hungPlayer.role}**.`);
+            io.to(roomCode).emit('updatePlayerList', getPublicPlayers(roomCode));
+        }
+    } else {
+        addSystemMessage(roomCode, 'Tidak ada yang digantung hari ini karena seri suara.');
+    }
+
+    checkGameEnd(roomCode);
+    if (room.gameState.phase === 'day') { // If game not over
+        setTimeout(() => startNightPhase(roomCode), 3000);
+    }
+}
+
+function startNightPhase(roomCode) {
+    const room = rooms[roomCode];
+    if (!room) return;
+
+    room.gameState.phase = 'night';
+    room.gameState.werewolfKillTarget = null;
+    room.gameState.doctorProtectTarget = null;
+    room.gameState.seerRevealTarget = null;
+    room.players.forEach(p => p.actionChosen = false); // Reset for night actions
+
+    io.to(roomCode).emit('updateGamePhase', 'Malam Hari (Aksi Peran)');
+    addSystemMessage(roomCode, 'Ini adalah malam hari. Werewolf berburu, Dokter melindungi, dan Seer melihat.');
+
+    const aliveWerewolves = room.players.filter(p => p.isAlive && p.role === 'Werewolf');
+    const aliveDoctors = room.players.filter(p => p.isAlive && p.role === 'Doctor');
+    const aliveSeers = room.players.filter(p => p.isAlive && p.role === 'Seer');
+    const alivePlayers = room.players.filter(p => p.isAlive);
+
+    // Request actions from human players with special roles
+    aliveWerewolves.forEach(p => {
+        if (p.type === 'human' && p.socketId) {
+            io.to(p.socketId).emit('requestWerewolfKill', alivePlayers.filter(ap => ap.role !== 'Werewolf').map(ap => ({ id: ap.id, name: ap.name })));
+        }
+    });
+    aliveDoctors.forEach(p => {
+        if (p.type === 'human' && p.socketId) {
+            io.to(p.socketId).emit('requestDoctorProtect', alivePlayers.map(ap => ({ id: ap.id, name: ap.name })));
+        }
+    });
+    aliveSeers.forEach(p => {
+        if (p.type === 'human' && p.socketId) {
+            io.to(p.socketId).emit('requestSeerReveal', alivePlayers.map(ap => ({ id: ap.id, name: ap.name })));
+        }
+    });
+
+    // Process computer actions after a short delay to allow human players to act
+    setTimeout(() => {
+        processComputerNightActions(roomCode);
+        resolveNightActions(roomCode);
+    }, 5000); // Give 5 seconds for human players to make night actions
+}
+
+function processComputerNightActions(roomCode) {
+    const room = rooms[roomCode];
+    if (!room) return;
+
+    const aliveComputerWerewolves = room.players.filter(p => p.isAlive && p.type === 'computer' && p.role === 'Werewolf' && !p.actionChosen);
+    const aliveComputerDoctors = room.players.filter(p => p.isAlive && p.type === 'computer' && p.role === 'Doctor' && !p.actionChosen);
+    const aliveComputerSeers = room.players.filter(p => p.isAlive && p.type === 'computer' && p.role === 'Seer' && !p.actionChosen);
+    const alivePlayers = room.players.filter(p => p.isAlive);
+
+    if (aliveComputerWerewolves.length > 0 && !room.gameState.werewolfKillTarget) {
+        const potentialTargets = alivePlayers.filter(p => p.role !== 'Werewolf');
+        if (potentialTargets.length > 0) {
+            room.gameState.werewolfKillTarget = potentialTargets[Math.floor(Math.random() * potentialTargets.length)];
+            addSystemMessage(roomCode, `${aliveComputerWerewolves[0].name} (Komputer Werewolf) memilih untuk membunuh ${room.gameState.werewolfKillTarget.name}.`);
+        }
+    }
+    aliveComputerWerewolves.forEach(p => p.actionChosen = true);
+
+
+    if (aliveComputerDoctors.length > 0 && !room.gameState.doctorProtectTarget) {
+        const target = alivePlayers[Math.floor(Math.random() * alivePlayers.length)];
+        room.gameState.doctorProtectTarget = target;
+        addSystemMessage(roomCode, `${aliveComputerDoctors[0].name} (Komputer Dokter) memilih untuk melindungi ${room.gameState.doctorProtectTarget.name}.`);
+    }
+    aliveComputerDoctors.forEach(p => p.actionChosen = true);
+
+
+    if (aliveComputerSeers.length > 0 && !room.gameState.seerRevealTarget) {
+        const target = alivePlayers[Math.floor(Math.random() * alivePlayers.length)];
+        room.gameState.seerRevealTarget = target; // Store for logging purposes if needed
+        addSystemMessage(roomCode, `${aliveComputerSeers[0].name} (Komputer Seer) melihat peran ${target.name}. Perannya adalah ${target.role}.`);
+    }
+    aliveComputerSeers.forEach(p => p.actionChosen = true);
+
+}
+
+function resolveNightActions(roomCode) {
+    const room = rooms[roomCode];
+    if (!room) return;
+
+    let killedPlayer = null;
+
+    if (room.gameState.werewolfKillTarget) {
+        // Find the actual player object in the room's player list
+        const targetPlayer = room.players.find(p => p.id === room.gameState.werewolfKillTarget.id);
+
+        if (targetPlayer && room.gameState.doctorProtectTarget && targetPlayer.id === room.gameState.doctorProtectTarget.id) {
+            addSystemMessage(roomCode, `Malam ini ${targetPlayer.name} diserang Werewolf tapi diselamatkan oleh Dokter.`);
+        } else if (targetPlayer) {
+            killedPlayer = targetPlayer;
+            killedPlayer.isAlive = false;
+            room.gameState.deadPlayersQueue.push(killedPlayer); // Add to queue for day announcement
+        }
+    }
+
+    checkGameEnd(roomCode);
+    if (room.gameState.phase === 'night') { // If game not over
+        setTimeout(() => startDayPhase(roomCode), 3000);
+    }
+}
+
+function checkGameEnd(roomCode) {
+    const room = rooms[roomCode];
+    if (!room) return;
+
+    const aliveWerewolves = room.players.filter(p => p.isAlive && p.role === 'Werewolf');
+    const aliveVillagers = room.players.filter(p => p.isAlive && p.role !== 'Werewolf'); // Villagers include Doctor, Seer
+
+    if (aliveWerewolves.length === 0) {
+        io.to(roomCode).emit('gameOver', 'Selamat! Penduduk desa memenangkan permainan!');
+        addSystemMessage(roomCode, 'Penduduk desa menang!');
+        room.gameState.phase = 'gameOver';
+    } else if (aliveWerewolves.length >= aliveVillagers.length) {
+        io.to(roomCode).emit('gameOver', 'Maaf! Werewolf memenangkan permainan!');
+        addSystemMessage(roomCode, 'Werewolf menang!');
+        room.gameState.phase = 'gameOver';
+    } else if (room.players.filter(p => p.isAlive).length <= 2) { // Too few players to continue
+        io.to(roomCode).emit('gameOver', 'Permainan berakhir karena jumlah pemain terlalu sedikit untuk melanjutkan!');
+        addSystemMessage(roomCode, 'Permainan berakhir karena terlalu sedikit pemain.');
+        room.gameState.phase = 'gameOver';
+    }
+}
+
+// Helper to add system messages to chat
+function addSystemMessage(roomCode, message) {
+    io.to(roomCode).emit('newChatMessage', `<span style="color: #666;">[Sistem]</span> ${message}`);
+}
+
+// --- Socket.IO Connection Handling ---
 io.on('connection', (socket) => {
-    console.log('Pengguna terhubung:', socket.id);
+    console.log(`User connected: ${socket.id}`);
 
-    // --- Lobby & Room Management ---
+    // --- Room Management ---
     socket.on('createRoom', () => {
-        const roomCode = Math.random().toString(36).substring(2, 7).toUpperCase();
+        const roomCode = generateRoomCode();
         rooms[roomCode] = {
-            players: [], // { id, name, type, role, isAlive, socketId, hasVoted, actionChosen }
-            gamePhase: 'setup',
-            chatMessages: [],
-            votes: {},
-            werewolfKillTarget: null,
-            doctorProtectTarget: null,
-            hostSocketId: socket.id // Store the host's socket ID
+            hostSocketId: socket.id,
+            players: [], // { id, name, type, role, isAlive, socketId }
+            gameState: {} // Game specific state
         };
         socket.join(roomCode);
         socket.emit('roomCreated', roomCode);
-        console.log(`Ruangan baru dibuat: ${roomCode} oleh ${socket.id}`);
+        console.log(`Room created: ${roomCode} by ${socket.id}`);
+        addSystemMessage(roomCode, `Ruangan ${roomCode} dibuat oleh host.`);
+        io.to(roomCode).emit('updatePlayerList', getPublicPlayers(roomCode)); // Send initial player list
     });
 
     socket.on('joinRoom', (roomCode) => {
-        if (rooms[roomCode] && rooms[roomCode].gamePhase === 'setup') {
-            // Check if player already registered in this room with THIS socket.id
-            const existingPlayerBySocket = rooms[roomCode].players.find(p => p.socketId === socket.id);
-            if (existingPlayerBySocket) {
-                 socket.emit('actionError', 'Anda sudah terdaftar di ruangan ini dengan koneksi ini.');
-                 socket.emit('playerRegistered', existingPlayerBySocket.id); // Re-confirm player registration
-                 io.to(roomCode).emit('updatePlayerList', rooms[roomCode].players.map(p => ({ id: p.id, name: p.name, isAlive: p.isAlive, type: p.type, socketId: p.socketId })));
-                 return;
-            }
-
-            // If it's a new human connecting, try to assign them to a 'human' placeholder if any
-            let assignedToPlaceholder = false;
-            // For now, we will just add them as a new human player.
-            // If you implement "human placeholder", this logic would find a null socketId 'human' player
-            // and assign this socket.id to it.
-
+        if (rooms[roomCode]) {
             socket.join(roomCode);
             socket.emit('joinedRoom', roomCode);
-            console.log(`${socket.id} bergabung ke ruangan: ${roomCode}`);
-            io.to(roomCode).emit('updatePlayerList', rooms[roomCode].players.map(p => ({ id: p.id, name: p.name, isAlive: p.isAlive, type: p.type, socketId: p.socketId })));
-            addChatMessage(roomCode, `Seorang pemain baru telah bergabung.`);
+            console.log(`${socket.id} joined room: ${roomCode}`);
+            // Update player list for all in room (even before player registers)
+            io.to(roomCode).emit('updatePlayerList', getPublicPlayers(roomCode));
+            addSystemMessage(roomCode, `${socket.id.substring(0,4)}... bergabung ke ruangan.`);
         } else {
             socket.emit('roomNotFound');
-            console.log(`${socket.id} mencoba bergabung ke ruangan tidak ada atau game sudah berjalan: ${roomCode}`);
+            console.log(`${socket.id} tried to join non-existent room: ${roomCode}`);
         }
     });
 
-    // --- Game Logic (Di Server) ---
-
-    socket.on('playerSetup', (data) => {
-        const { roomCode, playerName, playerType } = data;
+    // --- Player Setup ---
+    socket.on('playerSetup', ({ roomCode, playerName, playerType }) => {
         const room = rooms[roomCode];
-        if (room && room.gamePhase === 'setup') {
-            const existingPlayer = room.players.find(p => p.socketId === socket.id);
-            if (existingPlayer) {
-                socket.emit('actionError', 'Anda sudah terdaftar di ruangan ini.');
-                return;
-            }
-
-            const newPlayer = {
-                id: room.players.length, // Assign a unique ID
-                name: playerName,
-                type: playerType, // This player's type as chosen by themselves
-                socketId: socket.id, // This is a real player connected via this socket
-                role: null,
-                isAlive: true,
-                hasVoted: false,
-                actionChosen: false
-            };
-            room.players.push(newPlayer);
-            socket.emit('playerRegistered', newPlayer.id); // Konfirmasi ke pemain yang baru daftar
-            io.to(roomCode).emit('updatePlayerList', room.players.map(p => ({ id: p.id, name: p.name, isAlive: p.isAlive, type: p.type, socketId: p.socketId })));
-            addChatMessage(roomCode, `${playerName} (${playerType}) telah bergabung.`);
-        } else {
-            socket.emit('actionError', 'Tidak bisa mendaftar pemain saat ini.');
-        }
-    });
-
-    // Handle adding players via the "Add Seat" button (by host)
-    socket.on('addPlayerToRoom', (data) => {
-        const { roomCode, playerName, playerType } = data;
-        const room = rooms[roomCode];
-
-        // Ensure only the host can add players and game is in setup phase
-        if (room && room.hostSocketId === socket.id && room.gamePhase === 'setup') {
-            const newPlayer = {
-                id: room.players.length, // Assign a unique ID
-                name: playerName,
-                type: playerType, // Can be 'human' (as placeholder) or 'computer'
-                socketId: null, // No actual socket connected to this player
-                role: null,
-                isAlive: true,
-                hasVoted: false,
-                actionChosen: false
-            };
-            room.players.push(newPlayer);
-            io.to(roomCode).emit('updatePlayerList', room.players.map(p => ({ id: p.id, name: p.name, isAlive: p.isAlive, type: p.type, socketId: p.socketId })));
-            addChatMessage(roomCode, `${playerName} (${playerType} - Ditambahkan) telah ditambahkan ke ruangan.`);
-            console.log(`[${roomCode}] ${playerName} (${playerType}) added by host.`);
-        } else {
-            socket.emit('actionError', 'Anda tidak memiliki izin untuk menambahkan pemain atau game sudah dimulai.');
-        }
-    });
-
-    socket.on('startGame', (roomCode) => {
-        const room = rooms[roomCode];
-        // Check if the request comes from the host
-        if (room && room.hostSocketId === socket.id && room.gamePhase === 'setup') {
-            const connectedHumanPlayersCount = room.players.filter(p => p.type === 'human' && p.socketId !== null && p.isAlive).length;
-            
-            if (room.players.length >= 3 && connectedHumanPlayersCount >= 1) { // Min 3 total players, min 1 real human connected
-                assignRoles(room);
-                room.gamePhase = 'day';
-                addChatMessage(roomCode, 'Game dimulai! Selamat datang di desa Werewolf.');
-                
-                room.players.forEach(p => {
-                    if (p.socketId) { // Only send role to players with active sockets
-                        io.to(p.socketId).emit('yourRole', p.role);
-                        if (p.role === 'Werewolf') {
-                            const otherWerewolves = room.players.filter(ow => ow.isAlive && ow.id !== p.id && ow.role === 'Werewolf');
-                            if (otherWerewolves.length > 0) {
-                                io.to(p.socketId).emit('werewolfBuddies', otherWerewolves.map(ow => ow.name));
-                            }
-                        }
-                    }
-                });
-
-                io.to(roomCode).emit('gameStarted');
-                io.to(roomCode).emit('updatePlayerList', room.players.map(p => ({ id: p.id, name: p.name, isAlive: p.isAlive, type: p.type, socketId: p.socketId })));
-                startDayPhase(roomCode);
-            } else {
-                socket.emit('gameStartError', `Minimal 3 pemain total dan setidaknya 1 pemain manusia yang terhubung (saat ini: ${connectedHumanPlayersCount}).`);
-            }
-        } else {
-            socket.emit('gameStartError', 'Anda tidak memiliki izin untuk memulai game atau game sudah berjalan.');
-        }
-    });
-
-    socket.on('chatMessage', (data) => {
-        const { roomCode, senderId, message } = data;
-        const room = rooms[roomCode];
-        if (room) {
-            const sender = room.players.find(p => p.id === senderId);
-            addChatMessage(roomCode, `<strong>${sender ? sender.name : 'Unknown'}:</strong> ${message}`, false);
-        }
-    });
-
-    socket.on('disconnect', () => {
-        console.log('Pengguna terputus:', socket.id);
-        for (const roomCode in rooms) {
-            const room = rooms[roomCode];
-            const player = room.players.find(p => p.socketId === socket.id);
-            if (player) {
-                // For a real player, just remove their socketId, don't remove them from the game entirely
-                // If they are a placeholder, they won't have a socketId anyway
-                player.socketId = null; // Mark as disconnected
-                addChatMessage(roomCode, `${player.name} telah meninggalkan permainan.`);
-                io.to(roomCode).emit('updatePlayerList', room.players.map(p => ({ id: p.id, name: p.name, isAlive: p.isAlive, type: p.type, socketId: p.socketId })));
-                
-                // If the host disconnects, the room might become unmanageable
-                if (room.hostSocketId === socket.id) {
-                    addChatMessage(roomCode, `Host telah terputus. Game mungkin tidak dapat dilanjutkan atau dimulai.`);
-                    // Optionally, assign new host or delete room if empty
-                    // For simplicity, we just log this.
-                }
-
-                // If no real human players are left, maybe end the game or put on hold
-                const remainingConnectedHumans = room.players.filter(p => p.isAlive && p.type === 'human' && p.socketId !== null).length;
-                if (room.gamePhase !== 'gameOver' && remainingConnectedHumans === 0 && room.players.filter(p => p.isAlive).length > 0) {
-                     addChatMessage(roomCode, `Semua pemain manusia telah terputus. Permainan dilanjutkan dengan pemain Komputer (jika ada).`);
-                     // Optionally, automatically transition to computer-only game logic
-                }
-                
-                // Clean up empty rooms after some delay if no players left (real or placeholder)
-                // This is a simple cleanup; more complex logic might wait if game is active
-                if (room.players.every(p => p.socketId === null) && room.gamePhase === 'setup') {
-                    delete rooms[roomCode];
-                    console.log(`Room ${roomCode} deleted as all players disconnected in setup.`);
-                }
-                
-                checkGameEnd(roomCode); // Check if game state changes due to disconnection
-                break;
-            }
-        }
-    });
-
-    // --- Game Logic Functions (called by Socket.IO events or internally) ---
-
-    function assignRoles(room) {
-        const numPlayers = room.players.length;
-        let availableRoles = [];
-        
-        if (numPlayers >= 3 && numPlayers <= 5) {
-            availableRoles.push('Werewolf', 'Villager', 'Villager');
-            if (numPlayers >= 4) availableRoles.push('Doctor');
-            if (numPlayers === 5) availableRoles.push('Seer');
-        } else if (numPlayers >= 6 && numPlayers <= 10) {
-            availableRoles.push('Werewolf', 'Werewolf', 'Villager', 'Villager', 'Villager', 'Doctor', 'Seer');
-            if (numPlayers >= 8) availableRoles.push('Villager');
-            if (numPlayers >= 9) availableRoles.push('Werewolf');
-            if (numPlayers === 10) availableRoles.push('Villager');
-        } else {
-            let numWerewolves = Math.floor(numPlayers / 4);
-            if (numWerewolves < 2) numWerewolves = 2;
-            for (let i = 0; i < numWerewolves; i++) availableRoles.push('Werewolf');
-            availableRoles.push('Doctor', 'Seer');
-            while (availableRoles.length < numPlayers) {
-                availableRoles.push('Villager');
-            }
-        }
-
-        availableRoles.sort(() => Math.random() - 0.5);
-        room.players.forEach((player, index) => {
-            player.role = availableRoles[index];
-            console.log(`[${room.roomCode}] ${player.name} is ${player.role}`);
-        });
-    }
-
-    function addChatMessage(roomCode, message, isSystem = true) {
-        const room = rooms[roomCode];
-        if (room) {
-            const formattedMessage = isSystem ? `<span style="color: #666;">[Sistem]</span> ${message}` : message;
-            room.chatMessages.push(formattedMessage);
-            io.to(roomCode).emit('newChatMessage', formattedMessage);
-        }
-    }
-
-    function startDayPhase(roomCode) {
-        const room = rooms[roomCode];
-        if (!room || room.gamePhase === 'gameOver') return;
-        room.gamePhase = 'day';
-        room.votes = {}; // Reset votes
-        room.players.forEach(p => {
-            p.hasVoted = false;
-            p.actionChosen = false;
-        });
-        io.to(roomCode).emit('updateGamePhase', 'Siang Hari (Diskusi & Voting)');
-        addChatMessage(roomCode, 'Ini adalah siang hari. Diskusikan siapa yang mencurigakan.');
-        addChatMessage(roomCode, 'Waktunya voting. Pilih siapa yang ingin digantung!');
-        
-        // Request vote from all alive human players with active sockets
-        const activeHumanPlayers = room.players.filter(p => p.isAlive && p.type === 'human' && p.socketId !== null);
-        activeHumanPlayers.forEach(p => {
-            io.to(p.socketId).emit('requestVote', room.players.filter(target => target.isAlive && target.id !== p.id).map(t => ({ id: t.id, name: t.name })));
-        });
-
-        // If no active human players, trigger computer vote and resolve automatically
-        if (activeHumanPlayers.length === 0) {
-             setTimeout(() => {
-                performComputerDayVote(roomCode);
-                resolveDayVote(roomCode);
-            }, 2000);
-        } else {
-            // In a real game, you'd have a timer here. After the timer, check who voted, then run computer votes, then resolve.
-            // For this simplified example, we'll rely on human submissions to trigger resolution.
-        }
-    }
-
-    socket.on('submitVote', (data) => {
-        const { roomCode, voterId, targetId } = data;
-        const room = rooms[roomCode];
-        const voter = room.players.find(p => p.id === voterId);
-        const target = room.players.find(p => p.id === targetId);
-
-        if (room && room.gamePhase === 'day' && voter && voter.isAlive && !voter.hasVoted && voter.socketId === socket.id && target && target.isAlive && voterId !== targetId) {
-            if (room.votes[targetId]) {
-                room.votes[targetId]++;
-            } else {
-                room.votes[targetId] = 1;
-            }
-            voter.hasVoted = true;
-            addChatMessage(roomCode, `${voter.name} memilih untuk menggantung ${target.name}.`);
-            io.to(voter.socketId).emit('actionSubmitted');
-
-            const allAlivePlayers = room.players.filter(p => p.isAlive);
-            // Consider all players: humans (must vote) and computers (will auto-vote)
-            const allActivePlayersVoted = allAlivePlayers.every(p => p.hasVoted || p.type === 'computer');
-
-            if (allActivePlayersVoted) {
-                performComputerDayVote(roomCode); // Ensure computer players vote
-                setTimeout(() => resolveDayVote(roomCode), 1000);
-            }
-        } else {
-            io.to(socket.id).emit('actionError', 'Vote tidak valid atau sudah memilih.');
-        }
-    });
-
-    function performComputerDayVote(roomCode) {
-        const room = rooms[roomCode];
-        const aliveComputerPlayers = room.players.filter(p => p.isAlive && p.type === 'computer' && !p.hasVoted);
-
-        aliveComputerPlayers.forEach(computerPlayer => {
-            let targetPlayer = null;
-            const eligibleTargets = room.players.filter(p => p.isAlive && p.id !== computerPlayer.id);
-
-            if (eligibleTargets.length === 0) return;
-
-            // Simple AI for computer voting
-            if (computerPlayer.role === 'Werewolf') {
-                const nonWerewolfTargets = eligibleTargets.filter(p => p.role !== 'Werewolf');
-                targetPlayer = nonWerewolfTargets.length > 0 ? nonWerewolfTargets[Math.floor(Math.random() * nonWerewolfTargets.length)] : eligibleTargets[Math.floor(Math.random() * eligibleTargets.length)];
-            } else { // Villager, Doctor, Seer (try to target werewolves)
-                const werewolfTargets = eligibleTargets.filter(p => p.role === 'Werewolf');
-                targetPlayer = werewolfTargets.length > 0 ? werewolfTargets[Math.floor(Math.random() * werewolfTargets.length)] : eligibleTargets[Math.floor(Math.random() * eligibleTargets.length)];
-            }
-
-            if (targetPlayer) {
-                if (room.votes[targetPlayer.id]) {
-                    room.votes[targetPlayer.id]++;
-                } else {
-                    room.votes[targetPlayer.id] = 1;
-                }
-                computerPlayer.hasVoted = true;
-                addChatMessage(roomCode, `${computerPlayer.name} (Komputer) memilih untuk menggantung ${targetPlayer.name}.`);
-            }
-        });
-    }
-
-    function resolveDayVote(roomCode) {
-        const room = rooms[roomCode];
-        let maxVotes = 0;
-        let playersToHang = [];
-
-        if (Object.keys(room.votes).length === 0) {
-            addChatMessage(roomCode, 'Tidak ada yang digantung hari ini.');
-            setTimeout(() => startNightPhase(roomCode), 3000);
+        if (!room) {
+            socket.emit('actionError', 'Ruangan tidak ditemukan.');
             return;
         }
 
-        for (const targetId in room.votes) {
-            if (room.votes[targetId] > maxVotes) {
-                maxVotes = room.votes[targetId];
-                playersToHang = [parseInt(targetId)];
-            } else if (room.votes[targetId] === maxVotes) {
-                playersToHang.push(parseInt(targetId));
-            }
-        }
+        // Check if a player with this socket ID already exists in the room
+        let player = room.players.find(p => p.socketId === socket.id);
 
-        if (playersToHang.length === 1) {
-            const hungPlayer = room.players.find(p => p.id === playersToHang[0]);
-            if (hungPlayer) {
-                hungPlayer.isAlive = false;
-                addChatMessage(roomCode, `Desa telah menggantung <strong>${hungPlayer.name}</strong>. Perannya adalah <strong>${hungPlayer.role}</strong>.`);
-            }
+        if (player) {
+            // Update existing player
+            player.name = playerName;
+            player.type = playerType;
+            addSystemMessage(roomCode, `Pemain ${playerName} (${playerType}) telah memperbarui pendaftaran.`);
         } else {
-            addChatMessage(roomCode, 'Tidak ada yang digantung hari ini karena seri suara atau tidak ada yang memilih.');
+            // Create new player
+            const newPlayerId = room.players.length > 0 ? Math.max(...room.players.map(p => p.id)) + 1 : 0;
+            player = {
+                id: newPlayerId,
+                name: playerName,
+                type: playerType,
+                role: null,
+                isAlive: true,
+                socketId: socket.id,
+                hasVoted: false,
+                actionChosen: false,
+                voteTarget: null // Store vote target during day phase
+            };
+            room.players.push(player);
+            addSystemMessage(roomCode, `Pemain ${playerName} (${playerType}) telah terdaftar.`);
+        }
+        socket.emit('playerRegistered', player.id); // Confirm registration to the client
+        io.to(roomCode).emit('updatePlayerList', getPublicPlayers(roomCode));
+    });
+
+    // Host adds computer players or human placeholders
+    socket.on('addPlayerToRoom', ({ roomCode, playerName, playerType }) => {
+        const room = rooms[roomCode];
+        if (!room || room.hostSocketId !== socket.id) {
+            socket.emit('actionError', 'Anda bukan host atau ruangan tidak ditemukan.');
+            return;
+        }
+        const newPlayerId = room.players.length > 0 ? Math.max(...room.players.map(p => p.id)) + 1 : 0;
+        const player = {
+            id: newPlayerId,
+            name: playerName,
+            type: playerType, // Could be 'computer' or 'human' placeholder
+            role: null,
+            isAlive: true,
+            socketId: null, // No socket for computer or placeholder human
+            hasVoted: false,
+            actionChosen: false,
+            voteTarget: null
+        };
+        room.players.push(player);
+        addSystemMessage(roomCode, `Host menambahkan ${playerName} (${playerType}).`);
+        io.to(roomCode).emit('updatePlayerList', getPublicPlayers(roomCode));
+    });
+
+
+    // --- Game Start ---
+    socket.on('startGame', (roomCode) => {
+        const room = rooms[roomCode];
+        if (!room) {
+            socket.emit('actionError', 'Ruangan tidak ditemukan.');
+            return;
         }
 
-        room.votes = {}; // Clear votes for next day
-
-        io.to(roomCode).emit('updatePlayerList', room.players.map(p => ({ id: p.id, name: p.name, isAlive: p.isAlive, type: p.type, socketId: p.socketId })));
-        checkGameEnd(roomCode);
-        if (room.gamePhase !== 'gameOver') {
-            setTimeout(() => startNightPhase(roomCode), 3000);
+        if (room.hostSocketId !== socket.id) {
+            socket.emit('actionError', 'Hanya host yang bisa memulai game.');
+            return;
         }
-    }
-    
-    function startNightPhase(roomCode) {
+
+        const humanPlayersCount = room.players.filter(p => p.type === 'human' && p.socketId !== null).length;
+
+        if (room.players.length < 3) {
+            socket.emit('actionError', 'Minimal 3 pemain diperlukan untuk memulai game.');
+            return;
+        }
+
+        if (humanPlayersCount < 1) {
+             socket.emit('actionError', 'Minimal 1 pemain manusia yang terhubung diperlukan untuk memulai game.');
+            return;
+        }
+
+        console.log(`Starting game in room ${roomCode}`);
+        startGame(roomCode);
+    });
+
+    // --- In-Game Actions ---
+    socket.on('submitVote', ({ roomCode, voterId, targetId }) => {
         const room = rooms[roomCode];
-        if (!room || room.gamePhase === 'gameOver') return;
-        room.gamePhase = 'night';
-        room.werewolfKillTarget = null;
-        room.doctorProtectTarget = null;
-        room.players.forEach(p => p.actionChosen = false);
+        if (!room || room.gameState.phase !== 'day') {
+            socket.emit('actionError', 'Tidak bisa voting saat ini.');
+            return;
+        }
 
-        io.to(roomCode).emit('updateGamePhase', 'Malam Hari (Aksi Peran)');
-        addChatMessage(roomCode, 'Ini adalah malam hari. Werewolf berburu, Dokter melindungi, dan Seer melihat.');
-        
-        const activeHumanWerewolves = room.players.filter(p => p.isAlive && p.type === 'human' && p.role === 'Werewolf' && p.socketId !== null);
-        const activeHumanDoctors = room.players.filter(p => p.isAlive && p.type === 'human' && p.role === 'Doctor' && p.socketId !== null);
-        const activeHumanSeers = room.players.filter(p => p.isAlive && p.type === 'human' && p.role === 'Seer' && p.socketId !== null);
+        const voter = room.players.find(p => p.id === voterId && p.isAlive);
+        const target = room.players.find(p => p.id === targetId && p.isAlive);
 
-        // Request actions from active human players
-        activeHumanWerewolves.forEach(p => {
-            io.to(p.socketId).emit('requestWerewolfKill', room.players.filter(target => target.isAlive && target.role !== 'Werewolf').map(t => ({ id: t.id, name: t.name })));
-        });
-        activeHumanDoctors.forEach(p => {
-            io.to(p.socketId).emit('requestDoctorProtect', room.players.filter(target => target.isAlive).map(t => ({ id: t.id, name: t.name })));
-        });
-        activeHumanSeers.forEach(p => {
-            io.to(p.socketId).emit('requestSeerReveal', room.players.filter(target => target.isAlive).map(t => ({ id: t.id, name: t.name })));
-        });
-        
-        // Set a timeout to resolve night actions. This needs to be robust for multiplayer.
-        // For simplicity, it triggers after a fixed time (e.g., 5 seconds), assuming human actions are quick or computer handles them.
-        setTimeout(() => {
-            performComputerNightActions(roomCode); // Ensure computer players act
-            resolveNightActions(roomCode);
-        }, 5000); 
-    }
+        if (!voter || !target || voter.hasVoted) {
+            socket.emit('actionError', 'Anda tidak bisa voting.');
+            return;
+        }
 
-    socket.on('submitWerewolfKill', (data) => {
-        const { roomCode, voterId, targetId } = data; // voterId here is the killerId
-        const room = rooms[roomCode];
-        const killer = room.players.find(p => p.id === voterId);
-        const target = room.players.find(p => p.id === targetId);
-        if (room && room.gamePhase === 'night' && killer && killer.isAlive && killer.role === 'Werewolf' && !killer.actionChosen && killer.socketId === socket.id && target && target.isAlive && target.role !== 'Werewolf') {
-            room.werewolfKillTarget = target;
-            killer.actionChosen = true;
-            addChatMessage(roomCode, `${killer.name} memilih untuk membunuh ${target.name}.`);
-            io.to(killer.socketId).emit('actionSubmitted');
+        voter.hasVoted = true;
+        voter.voteTarget = targetId; // Store individual vote
+        if (room.gameState.votes[targetId]) {
+            room.gameState.votes[targetId]++;
         } else {
-            io.to(socket.id).emit('actionError', 'Aksi Werewolf tidak valid.');
+            room.gameState.votes[targetId] = 1;
+        }
+
+        io.to(socket.id).emit('actionSubmitted');
+        addSystemMessage(roomCode, `${voter.name} telah memberikan suaranya.`);
+
+        // Check if all active human players have voted
+        const allHumanVoted = room.players.filter(p => p.isAlive && p.type === 'human').every(p => p.hasVoted);
+        if (allHumanVoted) {
+            // Give a moment for last vote to register, then process computer votes and resolve
+            setTimeout(() => {
+                processComputerVotes(roomCode);
+                resolveDayVote(roomCode);
+            }, 1000);
         }
     });
 
-    socket.on('submitDoctorProtect', (data) => {
-        const { roomCode, voterId, targetId } = data; // voterId here is the doctorId
+    socket.on('submitWerewolfKill', ({ roomCode, voterId, targetId }) => {
         const room = rooms[roomCode];
-        const doctor = room.players.find(p => p.id === voterId);
-        const target = room.players.find(p => p.id === targetId);
-        if (room && room.gamePhase === 'night' && doctor && doctor.isAlive && doctor.role === 'Doctor' && !doctor.actionChosen && doctor.socketId === socket.id && target && target.isAlive) {
-            room.doctorProtectTarget = target;
-            doctor.actionChosen = true;
-            addChatMessage(roomCode, `${doctor.name} memilih untuk melindungi ${target.name}.`);
-            io.to(doctor.socketId).emit('actionSubmitted');
-        } else {
-            io.to(socket.id).emit('actionError', 'Aksi Dokter tidak valid.');
+        if (!room || room.gameState.phase !== 'night') {
+            socket.emit('actionError', 'Tidak bisa menyerang saat ini.');
+            return;
+        }
+
+        const werewolf = room.players.find(p => p.id === voterId && p.isAlive && p.role === 'Werewolf');
+        const target = room.players.find(p => p.id === targetId && p.isAlive && p.role !== 'Werewolf');
+
+        if (!werewolf || !target || werewolf.actionChosen) {
+            socket.emit('actionError', 'Anda tidak bisa melakukan aksi ini.');
+            return;
+        }
+
+        werewolf.actionChosen = true;
+        room.gameState.werewolfKillTarget = target; // Only one werewolf kill target for the night
+        io.to(socket.id).emit('actionSubmitted');
+        addSystemMessage(roomCode, `${werewolf.name} telah memilih mangsa.`);
+
+        // Check if all active human special roles have acted
+        // This could be made more robust to check for all werewolves, doctors, seers
+        const allHumanSpecialRolesActed = room.players.filter(p => p.isAlive && p.type === 'human' && ['Werewolf', 'Doctor', 'Seer'].includes(p.role))
+            .every(p => p.actionChosen);
+        if (allHumanSpecialRolesActed) {
+             setTimeout(() => {
+                processComputerNightActions(roomCode); // Ensure computer actions are processed
+                resolveNightActions(roomCode);
+            }, 1000);
         }
     });
 
-    socket.on('submitSeerReveal', (data) => {
-        const { roomCode, voterId, targetId } = data; // voterId here is the seerId
+    socket.on('submitDoctorProtect', ({ roomCode, voterId, targetId }) => {
         const room = rooms[roomCode];
-        const seer = room.players.find(p => p.id === voterId);
-        const target = room.players.find(p => p.id === targetId);
-        if (room && room.gamePhase === 'night' && seer && seer.isAlive && seer.role === 'Seer' && !seer.actionChosen && seer.socketId === socket.id && target && target.isAlive) {
-            // Seer's reveal is private, so send only to the seer.
-            io.to(seer.socketId).emit('newChatMessage', `<span style="color: green;">[Peran ${target.name} adalah ${target.role}]</span>`, false);
-            addChatMessage(roomCode, `${seer.name} melihat peran ${target.name}.`); // Public log just says they looked
-            seer.actionChosen = true;
-            io.to(seer.socketId).emit('actionSubmitted');
-        } else {
-            io.to(socket.id).emit('actionError', 'Aksi Seer tidak valid.');
+        if (!room || room.gameState.phase !== 'night') {
+            socket.emit('actionError', 'Tidak bisa melindungi saat ini.');
+            return;
+        }
+
+        const doctor = room.players.find(p => p.id === voterId && p.isAlive && p.role === 'Doctor');
+        const target = room.players.find(p => p.id === targetId && p.isAlive);
+
+        if (!doctor || !target || doctor.actionChosen) {
+            socket.emit('actionError', 'Anda tidak bisa melakukan aksi ini.');
+            return;
+        }
+
+        doctor.actionChosen = true;
+        room.gameState.doctorProtectTarget = target;
+        io.to(socket.id).emit('actionSubmitted');
+        addSystemMessage(roomCode, `${doctor.name} telah memilih untuk melindungi.`);
+
+        const allHumanSpecialRolesActed = room.players.filter(p => p.isAlive && p.type === 'human' && ['Werewolf', 'Doctor', 'Seer'].includes(p.role))
+            .every(p => p.actionChosen);
+        if (allHumanSpecialRolesActed) {
+             setTimeout(() => {
+                processComputerNightActions(roomCode);
+                resolveNightActions(roomCode);
+            }, 1000);
         }
     });
-    
-    function performComputerNightActions(roomCode) {
+
+    socket.on('submitSeerReveal', ({ roomCode, voterId, targetId }) => {
         const room = rooms[roomCode];
-        const aliveComputerWerewolves = room.players.filter(p => p.isAlive && p.type === 'computer' && p.role === 'Werewolf' && !p.actionChosen);
-        const aliveComputerDoctors = room.players.filter(p => p.isAlive && p.type === 'computer' && p.role === 'Doctor' && !p.actionChosen);
-        const aliveComputerSeers = room.players.filter(p => p.isAlive && p.type === 'computer' && p.role === 'Seer' && !p.actionChosen);
-
-        if (aliveComputerWerewolves.length > 0) {
-            const potentialTargets = room.players.filter(p => p.isAlive && p.role !== 'Werewolf');
-            if (potentialTargets.length > 0) {
-                room.werewolfKillTarget = potentialTargets[Math.floor(Math.random() * potentialTargets.length)];
-                addChatMessage(roomCode, `${aliveComputerWerewolves[0].name} (Komputer Werewolf) memilih untuk membunuh ${room.werewolfKillTarget.name}.`);
-            }
-            aliveComputerWerewolves.forEach(p => p.actionChosen = true);
+        if (!room || room.gameState.phase !== 'night') {
+            socket.emit('actionError', 'Tidak bisa melihat peran saat ini.');
+            return;
         }
 
-        if (aliveComputerDoctors.length > 0) {
-            const target = room.players.filter(p => p.isAlive)[Math.floor(Math.random() * room.players.filter(p => p.isAlive).length)];
-            room.doctorProtectTarget = target;
-            addChatMessage(roomCode, `${aliveComputerDoctors[0].name} (Komputer Dokter) memilih untuk melindungi ${room.doctorProtectTarget.name}.`);
-            aliveComputerDoctors.forEach(p => p.actionChosen = true);
+        const seer = room.players.find(p => p.id === voterId && p.isAlive && p.role === 'Seer');
+        const target = room.players.find(p => p.id === targetId && p.isAlive);
+
+        if (!seer || !target || seer.actionChosen) {
+            socket.emit('actionError', 'Anda tidak bisa melakukan aksi ini.');
+            return;
         }
 
-        if (aliveComputerSeers.length > 0) {
-            const target = room.players.filter(p => p.isAlive)[Math.floor(Math.random() * room.players.filter(p => p.isAlive).length)];
-            addChatMessage(roomCode, `${aliveComputerSeers[0].name} (Komputer Seer) melihat peran ${target.name}.`);
-            aliveComputerSeers.forEach(p => p.actionChosen = true);
+        seer.actionChosen = true;
+        io.to(socket.id).emit('actionSubmitted');
+        io.to(socket.id).emit('newChatMessage', `<span style="color: #666;">[Sistem]</span> Peran **${target.name}** adalah **${target.role}**.`);
+        addSystemMessage(roomCode, `${seer.name} telah melihat peran seseorang.`);
+
+        const allHumanSpecialRolesActed = room.players.filter(p => p.isAlive && p.type === 'human' && ['Werewolf', 'Doctor', 'Seer'].includes(p.role))
+            .every(p => p.actionChosen);
+        if (allHumanSpecialRolesActed) {
+             setTimeout(() => {
+                processComputerNightActions(roomCode);
+                resolveNightActions(roomCode);
+            }, 1000);
         }
-    }
+    });
 
-
-    function resolveNightActions(roomCode) {
+    // --- Chat ---
+    socket.on('chatMessage', ({ roomCode, senderId, message }) => {
         const room = rooms[roomCode];
-        if (!room || room.gamePhase === 'gameOver') return;
+        if (!room) return;
 
-        let killedPlayer = null;
+        const sender = room.players.find(p => p.id === senderId);
+        if (sender) {
+            // Check if sender is a Werewolf and it's night time
+            const isWerewolfChat = sender.role === 'Werewolf' && room.gameState.phase === 'night';
 
-        if (room.werewolfKillTarget) {
-            if (room.doctorProtectTarget && room.werewolfKillTarget.id === room.doctorProtectTarget.id) {
-                addChatMessage(roomCode, `Malam ini ${room.werewolfKillTarget.name} diserang Werewolf tapi diselamatkan oleh Dokter.`);
+            // If it's werewolf chat, send only to other werewolves
+            if (isWerewolfChat) {
+                const werewolfSockets = room.players
+                    .filter(p => p.role === 'Werewolf' && p.isAlive && p.socketId)
+                    .map(p => p.socketId);
+                werewolfSockets.forEach(sId => {
+                    io.to(sId).emit('newChatMessage', `<strong>${sender.name} (Werewolf):</strong> ${message}`);
+                });
             } else {
-                killedPlayer = room.werewolfKillTarget;
-                killedPlayer.isAlive = false;
-                addChatMessage(roomCode, `Malam ini, <strong>${killedPlayer.name}</strong> dimangsa oleh Werewolf. Perannya adalah <strong>${killedPlayer.role}</strong>.`);
+                // Otherwise, send to everyone in the room
+                io.to(roomCode).emit('newChatMessage', `<strong>${sender.name}:</strong> ${message}`);
             }
-        } else {
-            addChatMessage(roomCode, 'Tidak ada yang dimangsa malam ini.');
         }
+    });
 
-        io.to(roomCode).emit('updatePlayerList', room.players.map(p => ({ id: p.id, name: p.name, isAlive: p.isAlive, type: p.type, socketId: p.socketId })));
-        checkGameEnd(roomCode);
-        if (room.gamePhase !== 'gameOver') {
-            setTimeout(() => startDayPhase(roomCode), 3000);
+    // --- Disconnection ---
+    socket.on('disconnect', () => {
+        console.log(`User disconnected: ${socket.id}`);
+        for (const roomCode in rooms) {
+            const room = rooms[roomCode];
+            // Remove player from the room
+            const initialPlayerCount = room.players.length;
+            room.players = room.players.filter(p => p.socketId !== socket.id);
+
+            if (room.players.length < initialPlayerCount) {
+                // A player left the room
+                console.log(`Player ${socket.id} left room ${roomCode}.`);
+                io.to(roomCode).emit('updatePlayerList', getPublicPlayers(roomCode));
+                addSystemMessage(roomCode, `${socket.id.substring(0,4)}... meninggalkan ruangan.`);
+
+                // If host disconnects, delete room
+                if (room.hostSocketId === socket.id) {
+                    addSystemMessage(roomCode, 'Host terputus. Ruangan ini akan ditutup.');
+                    io.to(roomCode).emit('gameOver', 'Host terputus. Permainan berakhir.');
+                    delete rooms[roomCode];
+                    console.log(`Room ${roomCode} deleted due to host disconnect.`);
+                }
+                 // Check if game needs to end due to player count if game is active
+                if (room.gameState.phase && room.gameState.phase !== 'gameOver') {
+                    checkGameEnd(roomCode);
+                }
+                break; // A socket can only be in one room at a time for this simple structure
+            }
         }
-    }
-
-    function checkGameEnd(roomCode) {
-        const room = rooms[roomCode];
-        if (!room || room.gamePhase === 'gameOver') return;
-        const aliveWerewolves = room.players.filter(p => p.isAlive && p.role === 'Werewolf');
-        const aliveVillagers = room.players.filter(p => p.isAlive && p.role !== 'Werewolf');
-        const alivePlayersCount = room.players.filter(p => p.isAlive).length;
-
-        if (aliveWerewolves.length === 0) {
-            room.gamePhase = 'gameOver';
-            io.to(roomCode).emit('gameOver', 'Selamat! Penduduk desa memenangkan permainan!');
-            addChatMessage(roomCode, 'Permainan berakhir. Penduduk desa menang!');
-        } else if (aliveWerewolves.length >= aliveVillagers.length) {
-            room.gamePhase = 'gameOver';
-            io.to(roomCode).emit('gameOver', 'Maaf! Werewolf memenangkan permainan!');
-            addChatMessage(roomCode, 'Permainan berakhir. Werewolf menang!');
-        } else if (alivePlayersCount < 3) { // Not enough players to continue the game fairly
-            room.gamePhase = 'gameOver';
-            io.to(roomCode).emit('gameOver', 'Permainan berakhir karena jumlah pemain terlalu sedikit untuk melanjutkan!');
-            addChatMessage(roomCode, 'Permainan berakhir karena jumlah pemain terlalu sedikit untuk melanjutkan.');
-        }
-    }
+    });
 });
 
 server.listen(PORT, () => {
-    console.log(`Server berjalan di port ${PORT}`);
+    console.log(`Server running on http://localhost:${PORT}`);
+    console.log(`Serving static files from: ${path.join(__dirname, 'public')}`);
 });
