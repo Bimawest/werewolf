@@ -62,22 +62,8 @@ document.addEventListener('DOMContentLoaded', () => {
     let currentRoomCode = null;
     let myRole = null; // Peran pemain ini, hanya diketahui di client ini
     let isHost = false; // Flag to track if the current player is the host
-    let myKeyword = ''; // Added: Keyword for the current player
-
-    // List of keywords for the role display
-    const keywords = [
-        "Apel", "Buku", "Kursi", "Meja", "Pensil", "Gitar", "Kopi", "Teh", "Payung", "Topi",
-        "Sepatu", "Roti", "Susu", "Kunci", "Cermin", "Lampu", "Pintu", "Jendela", "Sabun", "Handuk",
-        "Telepon", "Dompet", "Kacamata", "Jam", "Bantal", "Selimut", "Botol", "Gelas", "Sandal", "Kaos",
-        "Kucing", "Anjing", "Burung", "Ikan", "Bunga", "Pohon", "Awan", "Bintang", "Bulan", "Matahari",
-        "Gunung", "Laut", "Sungai", "Jalan", "Mobil", "Sepeda", "Motor", "Pesawat", "Kereta", "Kapal"
-    ];
 
     // --- Helper Functions ---
-
-    function getRandomKeyword() {
-        return keywords[Math.floor(Math.random() * keywords.length)];
-    }
 
     function addChatMessage(message, isSystem = true) {
         const msgDiv = document.createElement('div');
@@ -96,13 +82,8 @@ document.addEventListener('DOMContentLoaded', () => {
         playerList.forEach(player => {
             const li = document.createElement('li');
             li.dataset.playerId = player.id;
-            // Add a class if this is the current player
-            if (myPlayerId !== null && player.id === myPlayerId) {
-                li.classList.add('is-me');
-            }
-
             // Display socket ID if available, for debugging in lobby for multiplayer
-            const socketIdInfo = (gameMode === 'multiplayer' && player.socketId) ? ` (${player.socketId ? player.socketId.substring(0, 4) + '...' : 'Disconnected'})` : '';
+            const socketIdInfo = (gameMode === 'multiplayer' && player.socketId) ? ` (${player.socketId.substring(0, 4)}...)` : '';
             li.innerHTML = `
                 <span class="player-name">${player.name}</span>
                 <span class="player-status">${player.isAlive ? 'Hidup' : 'Mati'}</span>
@@ -110,7 +91,8 @@ document.addEventListener('DOMContentLoaded', () => {
                 ${gameMode === 'multiplayer' ? `<span class="player-type-debug" style="font-size:0.8em; color:#999;"> (${player.type}${socketIdInfo})</span>` : ''}
             `;
             if (!player.isAlive) {
-                li.classList.add('dead'); // Add dead class for styling
+                li.style.textDecoration = 'line-through';
+                li.style.color = '#aaa';
             }
             targetUl.appendChild(li);
         });
@@ -118,10 +100,6 @@ document.addEventListener('DOMContentLoaded', () => {
 
     function createActionButtons(eligibleTargets, actionType, buttonText, submitEventName, extraData = {}) {
         actionButtons.innerHTML = `<h4>Pilih siapa yang ingin kamu ${buttonText.toLowerCase().replace('pilih', '')}:</h4>`;
-        if (eligibleTargets.length === 0) {
-            actionButtons.innerHTML += '<p>Tidak ada target yang tersedia saat ini.</p>';
-            return;
-        }
         eligibleTargets.forEach(target => {
             const btn = document.createElement('button');
             btn.textContent = `${buttonText} ${target.name}`;
@@ -143,9 +121,6 @@ document.addEventListener('DOMContentLoaded', () => {
         gameOverScreen.style.display = 'block';
         winnerDisplay.textContent = message;
         addChatMessage('Permainan berakhir.');
-        if (socket) {
-            socket.disconnect(); // Disconnect socket after game over in multiplayer
-        }
     }
 
     // --- Mode Selection ---
@@ -164,9 +139,9 @@ document.addEventListener('DOMContentLoaded', () => {
         gameMode = 'multiplayer';
         modeSelectionScreen.style.display = 'none';
         mpLobbyScreen.style.display = 'block';
-
+        
         // IMPORTANT: Change this URL to your ngrok URL or deployed server URL when in production!
-        // For local development, use 'http://localhost:3000'.
+        // For local development, use 'http://localhost:8158'.
         // If deployed to a cloud platform, use its public URL.
         socket = io('http://localhost:3000'); // Sesuaikan dengan port server Anda
 
@@ -177,16 +152,13 @@ document.addEventListener('DOMContentLoaded', () => {
 
         // --- Socket.IO Event Listeners (Multiplayer) ---
         socket.on('connect', () => {
-            addChatMessage(`Terhubung ke server sebagai ${socket.id.substring(0,4)}...`, true); // System message for connection
+            addChatMessage(`Terhubung ke server sebagai ${socket.id}`, false);
         });
 
         socket.on('disconnect', () => {
-            addChatMessage('Terputus dari server!', true); // System message for disconnection
-            // Only alert if not a normal game over restart
-            if (gamePhase !== 'gameOver') {
-                alert('Koneksi terputus dari server. Silakan muat ulang halaman.');
-                location.reload();
-            }
+            addChatMessage('Terputus dari server!', false);
+            alert('Koneksi terputus dari server. Silakan muat ulang halaman.');
+            location.reload();
         });
 
         socket.on('roomCreated', (roomCode) => {
@@ -221,7 +193,7 @@ document.addEventListener('DOMContentLoaded', () => {
             players = updatedPlayers; // Update local players array with public info
             updatePlayerListUI(players, mpPlayersInRoomUl); // For setup screen
             updatePlayerListUI(players, playersUl); // For game screen
-
+            
             // Only host can start if enough players are registered (min 3 total, min 1 human)
             const realHumanPlayers = players.filter(p => p.type === 'human' && p.socketId !== null).length;
             if (isHost && players.length >= 3 && realHumanPlayers >= 1) {
@@ -235,7 +207,6 @@ document.addEventListener('DOMContentLoaded', () => {
 
         socket.on('playerRegistered', (playerId) => {
             myPlayerId = playerId;
-            myKeyword = getRandomKeyword(); // Assign a keyword when player is registered
             mpRegisterPlayerBtn.disabled = true;
             mpRegisterPlayerBtn.textContent = 'Terdaftar';
             mpPlayerNameInput.disabled = true;
@@ -248,20 +219,15 @@ document.addEventListener('DOMContentLoaded', () => {
             gameScreen.style.display = 'block';
             chatMessages.innerHTML = ''; // Clear chat
             addChatMessage('Game dimulai!');
-            // Display initial role and keyword for the current player
-            if (myRole && myKeyword) { // Will be updated by 'yourRole' event too
-                 yourRoleDisplay.innerHTML = `Peranmu: <strong>${myRole}</strong><br>Kata Kunci: <strong>${myKeyword}</strong>`;
-            }
         });
 
         socket.on('yourRole', (role) => {
             myRole = role;
-            // Update role display with the new role and existing keyword
-            yourRoleDisplay.innerHTML = `Peranmu: <strong>${myRole}</strong><br>Kata Kunci: <strong>${myKeyword}</strong>`;
+            yourRoleDisplay.innerHTML = `Peranmu: <strong>${myRole}</strong>`;
         });
 
         socket.on('werewolfBuddies', (buddies) => {
-            addChatMessage(`Werewolf lain adalah: ${buddies.join(', ')}.`, true);
+            addChatMessage(`Werewolf lain adalah: ${buddies.join(', ')}.`);
         });
 
         socket.on('newChatMessage', (message) => {
@@ -270,7 +236,7 @@ document.addEventListener('DOMContentLoaded', () => {
 
         socket.on('updateGamePhase', (phaseText) => {
             currentPhaseDisplay.textContent = `Fase: ${phaseText}`;
-            actionButtons.innerHTML = ''; // Clear action buttons from previous phase
+            actionButtons.innerHTML = ''; // Bersihkan tombol aksi dari fase sebelumnya
         });
 
         socket.on('requestVote', (eligibleTargets) => {
@@ -323,7 +289,7 @@ document.addEventListener('DOMContentLoaded', () => {
             const playerDiv = document.createElement('div');
             playerDiv.className = 'player-setup-item';
             playerDiv.innerHTML = `
-                <label for="sp-player-name-${i}">Pemain ${i + 1}:</label>
+                <label>Pemain ${i + 1}:</label>
                 <input type="text" id="sp-player-name-${i}" placeholder="Nama Pemain ${i + 1}" value="Pemain ${i + 1}">
                 <select id="sp-player-type-${i}">
                     <option value="human">Manusia</option>
@@ -334,7 +300,7 @@ document.addEventListener('DOMContentLoaded', () => {
         }
 
         const confirmPlayersBtn = document.createElement('button');
-        confirmPlayersBtn.textContent = 'Konfirmasi Pemain & Mulai Game';
+        confirmPlayersBtn.textContent = 'Konfirmasi Pemain';
         confirmPlayersBtn.addEventListener('click', confirmSinglePlayerSetup);
         spPlayerTypeSelection.appendChild(confirmPlayersBtn);
         spPlayerTypeSelection.style.display = 'block';
@@ -343,13 +309,9 @@ document.addEventListener('DOMContentLoaded', () => {
     function confirmSinglePlayerSetup() {
         const numPlayers = parseInt(spNumPlayersInput.value);
         players = [];
-        let humanPlayerFound = false;
         for (let i = 0; i < numPlayers; i++) {
             const nameInput = document.getElementById(`sp-player-name-${i}`);
             const typeSelect = document.getElementById(`sp-player-type-${i}`);
-            const isHuman = typeSelect.value === 'human';
-            if (isHuman) humanPlayerFound = true;
-
             players.push({
                 id: i,
                 name: nameInput.value || `Pemain ${i + 1}`,
@@ -357,17 +319,9 @@ document.addEventListener('DOMContentLoaded', () => {
                 role: null, // Role will be assigned soon
                 isAlive: true,
                 hasVoted: false,
-                actionChosen: false,
-                // In single player, all players (even computer) get a keyword for consistency
-                keyword: getRandomKeyword() // Assign a keyword to each player
+                actionChosen: false
             });
         }
-
-        if (!humanPlayerFound) {
-            alert('Anda harus memiliki setidaknya satu pemain manusia (Anda) di mode Single Player.');
-            return; // Stay on setup screen
-        }
-
         spPlayerTypeSelection.style.display = 'none';
         assignRolesSinglePlayer();
         startSinglePlayerGame();
@@ -411,18 +365,17 @@ document.addEventListener('DOMContentLoaded', () => {
         if (humanPlayer) {
             myPlayerId = humanPlayer.id; // Set myPlayerId for single player (current user)
             myRole = humanPlayer.role;
-            myKeyword = humanPlayer.keyword; // Get the assigned keyword for single player
-            yourRoleDisplay.innerHTML = `Peranmu: <strong>${myRole}</strong><br>Kata Kunci: <strong>${myKeyword}</strong>`;
-            addChatMessage(`Hai ${humanPlayer.name}, peranmu adalah: <strong>${myRole}</strong>.`, true);
+            yourRoleDisplay.textContent = `Peranmu: ${myRole}`;
+            addChatMessage(`Hai ${humanPlayer.name}, peranmu adalah: <strong>${myRole}</strong>.`);
             if (myRole === 'Werewolf') {
                 const otherWerewolves = players.filter(p => p.isAlive && p.id !== humanPlayer.id && p.role === 'Werewolf');
                 if (otherWerewolves.length > 0) {
-                    addChatMessage(`Werewolf lain adalah: ${otherWerewolves.map(p => p.name).join(', ')}.`, true);
+                    addChatMessage(`Werewolf lain adalah: ${otherWerewolves.map(p => p.name).join(', ')}.`);
                 }
             }
         } else {
             yourRoleDisplay.textContent = `Peranmu: (Kamu adalah Pengamat)`;
-            addChatMessage('Semua pemain adalah Komputer. Saksikan permainan berlangsung!', true);
+            addChatMessage('Semua pemain adalah Komputer. Saksikan permainan berlangsung!');
             myPlayerId = -1; // Indicate observer mode for the UI
         }
 
@@ -432,7 +385,7 @@ document.addEventListener('DOMContentLoaded', () => {
     function startDayPhaseSinglePlayer() {
         gamePhase = 'day';
         currentPhaseDisplay.textContent = 'Fase: Siang Hari (Diskusi & Voting)';
-        addChatMessage('Ini adalah siang hari. Diskusikan siapa yang mencurigakan.', true);
+        addChatMessage('Ini adalah siang hari. Diskusikan siapa yang mencurigakan.');
         actionButtons.innerHTML = '';
 
         players.forEach(p => {
@@ -446,7 +399,7 @@ document.addEventListener('DOMContentLoaded', () => {
             return;
         }
 
-        addChatMessage('Waktunya voting. Pilih siapa yang ingin digantung!', true);
+        addChatMessage('Waktunya voting. Pilih siapa yang ingin digantung!');
         const humanPlayer = players.find(p => p.isAlive && p.type === 'human');
         if (humanPlayer) {
             createActionButtons(players.filter(p => p.isAlive && p.id !== humanPlayer.id), 'vote', 'Gantung', null);
@@ -463,7 +416,7 @@ document.addEventListener('DOMContentLoaded', () => {
         const targetPlayer = players.find(p => p.id === targetId);
 
         if (!actingPlayer || !actingPlayer.isAlive || actingPlayer.actionChosen) {
-            addChatMessage('Anda tidak bisa melakukan aksi ini sekarang.', true);
+            addChatMessage('Anda tidak bisa melakukan aksi ini sekarang.');
             return;
         }
 
@@ -476,15 +429,15 @@ document.addEventListener('DOMContentLoaded', () => {
                 spVotes[targetId] = 1;
             }
             actingPlayer.hasVoted = true;
-            addChatMessage(`${actingPlayer.name} memilih untuk menggantung ${targetPlayer.name}.`, false);
+            addChatMessage(`${actingPlayer.name} memilih untuk menggantung ${targetPlayer.name}.`);
         } else if (actionType === 'kill') {
             spWerewolfKillTarget = targetPlayer;
-            addChatMessage(`${actingPlayer.name} memilih untuk membunuh ${targetPlayer.name}.`, false);
+            addChatMessage(`${actingPlayer.name} memilih untuk membunuh ${targetPlayer.name}.`);
         } else if (actionType === 'protect') {
             spDoctorProtectTarget = targetPlayer;
-            addChatMessage(`${actingPlayer.name} memilih untuk melindungi ${targetPlayer.name}.`, false);
+            addChatMessage(`${actingPlayer.name} memilih untuk melindungi ${targetPlayer.name}.`);
         } else if (actionType === 'reveal') {
-            addChatMessage(`${actingPlayer.name} melihat peran ${targetPlayer.name}. Perannya adalah <strong>${targetPlayer.role}</strong>.`, false);
+            addChatMessage(`${actingPlayer.name} melihat peran ${targetPlayer.name}. Perannya adalah <strong>${targetPlayer.role}</strong>.`);
         }
 
         // Check if all actions/votes are done to proceed
@@ -534,7 +487,7 @@ document.addEventListener('DOMContentLoaded', () => {
                     spVotes[targetPlayer.id] = 1;
                 }
                 computerPlayer.hasVoted = true;
-                addChatMessage(`${computerPlayer.name} (Komputer) memilih untuk menggantung ${targetPlayer.name}.`, false);
+                addChatMessage(`${computerPlayer.name} (Komputer) memilih untuk menggantung ${targetPlayer.name}.`);
             }
         });
     }
@@ -544,7 +497,7 @@ document.addEventListener('DOMContentLoaded', () => {
         let playersToHang = [];
 
         if (Object.keys(spVotes).length === 0) {
-            addChatMessage('Tidak ada yang digantung hari ini.', true);
+            addChatMessage('Tidak ada yang digantung hari ini.');
             setTimeout(startNightPhaseSinglePlayer, 3000);
             return;
         }
@@ -562,10 +515,10 @@ document.addEventListener('DOMContentLoaded', () => {
             const hungPlayer = players.find(p => p.id === playersToHang[0]);
             if (hungPlayer) {
                 hungPlayer.isAlive = false;
-                addChatMessage(`Desa telah menggantung <strong>${hungPlayer.name}</strong>. Perannya adalah <strong>${hungPlayer.role}</strong>.`, true);
+                addChatMessage(`Desa telah menggantung <strong>${hungPlayer.name}</strong>. Perannya adalah <strong>${hungPlayer.role}</strong>.`);
             }
         } else {
-            addChatMessage('Tidak ada yang digantung hari ini karena seri suara atau tidak ada yang memilih.', true);
+            addChatMessage('Tidak ada yang digantung hari ini karena seri suara atau tidak ada yang memilih.');
         }
 
         for (const key in spVotes) {
@@ -582,7 +535,7 @@ document.addEventListener('DOMContentLoaded', () => {
     function startNightPhaseSinglePlayer() {
         gamePhase = 'night';
         currentPhaseDisplay.textContent = 'Fase: Malam Hari (Aksi Peran)';
-        addChatMessage('Ini adalah malam hari. Werewolf berburu, Dokter melindungi, dan Seer melihat.', true);
+        addChatMessage('Ini adalah malam hari. Werewolf berburu, Dokter melindungi, dan Seer melihat.');
         actionButtons.innerHTML = '';
 
         spWerewolfKillTarget = null;
@@ -590,7 +543,7 @@ document.addEventListener('DOMContentLoaded', () => {
         players.forEach(p => p.actionChosen = false); // Reset actionChosen for night
 
         const alivePlayers = players.filter(p => p.isAlive);
-        if (alivePlayers.length <= 0) { // If no players left or only one, can't continue night
+        if (alivePlayers.length === 0) {
             checkSinglePlayerGameEnd();
             return;
         }
@@ -599,65 +552,58 @@ document.addEventListener('DOMContentLoaded', () => {
         const humanDoctor = players.find(p => p.isAlive && p.type === 'human' && p.role === 'Doctor');
         const humanSeer = players.find(p => p.isAlive && p.type === 'human' && p.role === 'Seer');
 
-        // Only request actions from human players if they are alive and haven't acted
-        if (humanWerewolf && !humanWerewolf.actionChosen) {
-            addChatMessage('Werewolf bangun. Pilih siapa yang ingin kamu mangsa.', true);
+        if (humanWerewolf) {
+            addChatMessage('Werewolf bangun. Pilih siapa yang ingin kamu mangsa.');
             createActionButtons(alivePlayers.filter(p => p.role !== 'Werewolf'), 'kill', 'Mangsa', null);
         }
-        if (humanDoctor && !humanDoctor.actionChosen) {
-            addChatMessage('Dokter bangun. Pilih siapa yang ingin kamu lindungi.', true);
+        if (humanDoctor) {
+            addChatMessage('Dokter bangun. Pilih siapa yang ingin kamu lindungi.');
             createActionButtons(alivePlayers, 'protect', 'Lindungi', null);
         }
-        if (humanSeer && !humanSeer.actionChosen) {
-            addChatMessage('Seer bangun. Pilih siapa yang ingin kamu lihat perannya.', true);
+        if (humanSeer) {
+            addChatMessage('Seer bangun. Pilih siapa yang ingin kamu lihat perannya.');
             createActionButtons(alivePlayers, 'reveal', 'Lihat Peran', null);
         }
 
-        // Trigger computer actions and resolve night after a short delay
-        // This ensures human player has a moment to see their options before computers act,
-        // and also resolves the night if no human players or all human actions are done.
-        setTimeout(() => {
-            performComputerNightActionsSinglePlayer();
-            resolveNightActionsSinglePlayer();
-        }, 3000); // Give 3 seconds for human player to act if any
+        // If no human special roles or they have already acted, trigger computer actions
+        const allHumanSpecialRolesActed = (!humanWerewolf || humanWerewolf.actionChosen) &&
+                                          (!humanDoctor || humanDoctor.actionChosen) &&
+                                          (!humanSeer || humanSeer.actionChosen);
+        if (allHumanSpecialRolesActed) {
+             setTimeout(() => {
+                performComputerNightActionsSinglePlayer();
+                resolveNightActionsSinglePlayer();
+            }, 1000);
+        }
     }
 
     function performComputerNightActionsSinglePlayer() {
         const aliveComputerWerewolves = players.filter(p => p.isAlive && p.type === 'computer' && p.role === 'Werewolf' && !p.actionChosen);
         const aliveComputerDoctors = players.filter(p => p.isAlive && p.type === 'computer' && p.role === 'Doctor' && !p.actionChosen);
         const aliveComputerSeers = players.filter(p => p.isAlive && p.type === 'computer' && p.role === 'Seer' && !p.actionChosen);
-        const alivePlayers = players.filter(p => p.isAlive);
-
 
         if (aliveComputerWerewolves.length > 0) {
-            const potentialTargets = alivePlayers.filter(p => p.role !== 'Werewolf');
+            const potentialTargets = players.filter(p => p.isAlive && p.role !== 'Werewolf');
             if (potentialTargets.length > 0) {
-                // If there's an existing human target for werewolf, stick to it or override if computer target is better
-                if (!spWerewolfKillTarget || !potentialTargets.some(p => p.id === spWerewolfKillTarget.id)) { // If no human choice, or human chose an invalid target (e.g. self, or werewolf)
-                    spWerewolfKillTarget = potentialTargets[Math.floor(Math.random() * potentialTargets.length)];
-                }
-                addChatMessage(`${aliveComputerWerewolves[0].name} (Komputer Werewolf) memilih untuk membunuh ${spWerewolfKillTarget.name}.`, false);
+                spWerewolfKillTarget = potentialTargets[Math.floor(Math.random() * potentialTargets.length)];
+                addChatMessage(`${aliveComputerWerewolves[0].name} (Komputer Werewolf) memilih untuk membunuh ${spWerewolfKillTarget.name}.`);
             }
             aliveComputerWerewolves.forEach(p => p.actionChosen = true);
         }
 
         if (aliveComputerDoctors.length > 0) {
-            // Doctor might try to protect a random player, or if human has selected, don't override
-            if (!spDoctorProtectTarget) {
-                 const target = alivePlayers[Math.floor(Math.random() * alivePlayers.length)];
-                spDoctorProtectTarget = target;
-            }
-            addChatMessage(`${aliveComputerDoctors[0].name} (Komputer Dokter) memilih untuk melindungi ${spDoctorProtectTarget.name}.`, false);
+            const target = players.filter(p => p.isAlive)[Math.floor(Math.random() * players.filter(p => p.isAlive).length)];
+            spDoctorProtectTarget = target;
+            addChatMessage(`${aliveComputerDoctors[0].name} (Komputer Dokter) memilih untuk melindungi ${spDoctorProtectTarget.name}.`);
             aliveComputerDoctors.forEach(p => p.actionChosen = true);
         }
 
         if (aliveComputerSeers.length > 0) {
-            const target = alivePlayers[Math.floor(Math.random() * alivePlayers.length)];
-            addChatMessage(`${aliveComputerSeers[0].name} (Komputer Seer) melihat peran ${target.name}.`, false);
+            const target = players.filter(p => p.isAlive)[Math.floor(Math.random() * players.filter(p => p.isAlive).length)];
+            addChatMessage(`${aliveComputerSeers[0].name} (Komputer Seer) melihat peran ${target.name}.`);
             aliveComputerSeers.forEach(p => p.actionChosen = true);
         }
     }
-
 
     function resolveNightActionsSinglePlayer() {
         actionButtons.innerHTML = ''; // Clear action buttons
@@ -666,16 +612,14 @@ document.addEventListener('DOMContentLoaded', () => {
 
         if (spWerewolfKillTarget) {
             if (spDoctorProtectTarget && spWerewolfKillTarget.id === spDoctorProtectTarget.id) {
-                addChatMessage(`Malam ini ${spWerewolfKillTarget.name} diserang Werewolf tapi diselamatkan oleh Dokter.`, true);
+                addChatMessage(`Malam ini ${spWerewolfKillTarget.name} diserang Werewolf tapi diselamatkan oleh Dokter.`);
             } else {
-                killedPlayer = players.find(p => p.id === spWerewolfKillTarget.id); // Find the actual player object
-                if (killedPlayer) {
-                    killedPlayer.isAlive = false;
-                    addChatMessage(`Malam ini, <strong>${killedPlayer.name}</strong> dimangsa oleh Werewolf. Perannya adalah <strong>${killedPlayer.role}</strong>.`, true);
-                }
+                killedPlayer = spWerewolfKillTarget;
+                killedPlayer.isAlive = false;
+                addChatMessage(`Malam ini, <strong>${killedPlayer.name}</strong> dimangsa oleh Werewolf. Perannya adalah <strong>${killedPlayer.role}</strong>.`);
             }
         } else {
-            addChatMessage('Tidak ada yang dimangsa malam ini.', true);
+            addChatMessage('Tidak ada yang dimangsa malam ini.');
         }
 
         updatePlayerListUI(players, playersUl);
@@ -696,7 +640,7 @@ document.addEventListener('DOMContentLoaded', () => {
         } else if (aliveWerewolves.length >= aliveVillagers.length) {
             showGameEnd('Maaf! Werewolf memenangkan permainan!');
             gamePhase = 'gameOver';
-        } else if (alivePlayersCount < 3 && gamePhase !== 'gameOver') { // Prevent re-triggering if already over
+        } else if (alivePlayersCount < 3) {
             showGameEnd('Permainan berakhir karena jumlah pemain terlalu sedikit!');
             gamePhase = 'gameOver';
         }
@@ -727,11 +671,10 @@ document.addEventListener('DOMContentLoaded', () => {
     });
 
     mpStartGameServerBtn.addEventListener('click', () => {
-        // The server-side check for min players is more authoritative, but a client-side hint is good.
-        if (currentRoomCode) {
+        if (currentRoomCode && players.length >= 3) { // Use 'players' array from socket updates
             socket.emit('startGame', currentRoomCode);
         } else {
-            alert('Terjadi kesalahan. Coba lagi.');
+            alert('Minimal 3 pemain untuk memulai game.'); // Perbaikan: titik koma berlebih dihapus
         }
     });
 
@@ -750,6 +693,8 @@ document.addEventListener('DOMContentLoaded', () => {
         const playerName = newPlayerNameInput.value.trim();
         const playerType = newPlayerTypeSelect.value; // 'human' or 'computer'
         if (playerName && currentRoomCode) {
+            // When adding via button, we treat 'human' as a computer-controlled placeholder for simplicity
+            // A real "human" would connect via their own browser and join the room.
             socket.emit('addPlayerToRoom', { roomCode: currentRoomCode, playerName, playerType: playerType });
             addSeatModal.style.display = 'none'; // Hide the modal
         } else {
@@ -767,9 +712,7 @@ document.addEventListener('DOMContentLoaded', () => {
             socket.emit('chatMessage', { roomCode: currentRoomCode, senderId: myPlayerId, message });
             chatInput.value = '';
         } else if (message && gameMode === 'singleplayer') {
-            const myPlayer = players.find(p => p.id === myPlayerId);
-            const senderName = myPlayer ? myPlayer.name : 'Anda'; // Use player name if available
-            addChatMessage(`<strong>${senderName}:</strong> ${message}`, false);
+            addChatMessage(`<strong>Kamu:</strong> ${message}`, false);
             chatInput.value = '';
         }
     });
