@@ -19,9 +19,10 @@
             <h2>Setup Single Player</h2>
             <label for="sp-num-players">Jumlah Pemain (3-20):</label>
             <input type="number" id="sp-num-players" min="3" max="20" value="5">
-            <button id="sp-start-game-btn">Mulai Permainan Single Player</button>
+            <button id="sp-start-game-btn">Konfigurasi Pemain</button>
             </div>
             <div id="sp-player-type-selection" style="display: none;"></div>
+        
 
         <div id="multiplayer-lobby-screen" style="display: none;">
             <h2>Multiplayer</h2>
@@ -44,7 +45,7 @@
                 <option value="computer">Komputer</option>
             </select>
             <button id="mp-register-player-btn">Daftar Pemain</button>
-            
+
             <button id="add-seat-btn" style="display: none;">Tambahkan Kursi (Komputer/Manusia)</button>
             <div id="add-seat-modal" class="modal" style="display: none;">
                 <div class="modal-content">
@@ -65,7 +66,7 @@
             <p>Pemain dalam ruangan:</p>
             <ul id="mp-players-in-room-ul"></ul>
         </div>
-        
+
         <div id="game-screen" style="display: none;">
             <div id="player-list">
                 <h2>Daftar Pemain</h2>
@@ -79,7 +80,7 @@
             </div>
 
             <div id="communication-area">
-                <h3>Log Komunikasi</h3>
+                <h3>Log Komunikasi (Werewolf Chat di Malam Hari)</h3>
                 <div id="chat-messages"></div>
                 <input type="text" id="chat-input" placeholder="Ketik pesan...">
                 <button id="send-chat-btn">Kirim</button>
@@ -93,5 +94,6 @@
     </div>
 
     <script src="/socket.io/socket.io.js"></script>
-    <script src="script.js"></script> </body>
+    <script src="script.js"></script>
+</body>
 </html>
