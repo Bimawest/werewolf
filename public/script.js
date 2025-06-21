@@ -139,14 +139,14 @@ document.addEventListener('DOMContentLoaded', () => {
     }
 
     function showGameEnd(message) {
-        gameScreen.style.display = 'none';
-        gameOverScreen.style.display = 'block';
-        winnerDisplay.textContent = message;
-        addChatMessage('Permainan berakhir.');
-        if (socket) {
-            socket.disconnect(); // Disconnect socket after game over in multiplayer
-        }
-    }
+    gameScreen.style.display = 'none';
+    gameOverScreen.style.display = 'block';
+    winnerDisplay.textContent = message;
+    addChatMessage('Permainan berakhir.');
+    // if (socket) {
+    //     socket.disconnect(); // Socket tidak lagi terputus otomatis saat game over
+    // }
+}
 
     // --- Mode Selection ---
     singlePlayerModeBtn.addEventListener('click', () => {
@@ -781,8 +781,16 @@ document.addEventListener('DOMContentLoaded', () => {
     });
 
     restartGameBtn.addEventListener('click', () => {
-        location.reload(); // Simplest way to restart for both modes
-    });
+    if (gameMode === 'multiplayer' && isHost) {
+        // Beri tahu server bahwa host ingin me-restart game
+        socket.emit('restartGame', currentRoomCode);
+    }
+    // Disconnect setelah restart game diinisiasi
+    if (socket) {
+        socket.disconnect(); // Baru putuskan koneksi di sini
+    }
+    location.reload(); // Muat ulang halaman setelah disconnect
+});
 
     // --- Initial Display ---
     modeSelectionScreen.style.display = 'block';
