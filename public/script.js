@@ -75,8 +75,16 @@ document.addEventListener('DOMContentLoaded', () => {
 
     // --- Helper Functions ---
 
-    function getRandomKeyword() {
-        return keywords[Math.floor(Math.random() * keywords.length)];
+    // PERBAIKAN: Fungsi getRandomKeyword sekarang menerima parameter usedKeywords
+    function getRandomKeyword(usedKeywords = []) {
+        let availableKeywords = keywords.filter(k => !usedKeywords.includes(k));
+        if (availableKeywords.length === 0) {
+            // Fallback: If no unique keywords left, just pick one randomly from all
+            return keywords[Math.floor(Math.random() * keywords.length)];
+        }
+        const randomIndex = Math.floor(Math.random() * availableKeywords.length);
+        const keyword = availableKeywords[randomIndex];
+        return keyword;
     }
 
     function addChatMessage(message, isSystem = true) {
@@ -168,7 +176,7 @@ document.addEventListener('DOMContentLoaded', () => {
         // IMPORTANT: Change this URL to your ngrok URL or deployed server URL when in production!
         // For local development, use 'http://localhost:3000'.
         // If deployed to a cloud platform, use its public URL.
-        socket = io('http://localhost:3000'); // Sesuaikan dengan port server Anda
+        socket = io(); // Sesuaikan dengan port server Anda
 
         // Initialize display for Multiplayer
         mpPlayerSetupScreen.style.display = 'none';
@@ -235,7 +243,7 @@ document.addEventListener('DOMContentLoaded', () => {
 
         socket.on('playerRegistered', (playerId) => {
             myPlayerId = playerId;
-            myKeyword = getRandomKeyword(); // Assign a keyword when player is registered
+            // myKeyword = getRandomKeyword(); // PERBAIKAN: Hapus baris ini. Keyword akan dikirim dari server
             mpRegisterPlayerBtn.disabled = true;
             mpRegisterPlayerBtn.textContent = 'Terdaftar';
             mpPlayerNameInput.disabled = true;
@@ -259,6 +267,16 @@ document.addEventListener('DOMContentLoaded', () => {
             // Update role display with the new role and existing keyword
             yourRoleDisplay.innerHTML = `Peranmu: <strong>${myRole}</strong><br>Kata Kunci: <strong>${myKeyword}</strong>`;
         });
+
+        // PERBAIKAN: Tambahkan event listener untuk 'yourKeyword'
+        socket.on('yourKeyword', (keyword) => {
+            myKeyword = keyword; // Update the client-side keyword with the one from the server
+            // Ensure the display is updated after both role and keyword are received
+            if (myRole && myKeyword) {
+                 yourRoleDisplay.innerHTML = `Peranmu: <strong>${myRole}</strong><br>Kata Kunci: <strong>${myKeyword}</strong>`;
+            }
+        });
+
 
         socket.on('werewolfBuddies', (buddies) => {
             addChatMessage(`Werewolf lain adalah: ${buddies.join(', ')}.`, true);
@@ -359,7 +377,8 @@ document.addEventListener('DOMContentLoaded', () => {
                 hasVoted: false,
                 actionChosen: false,
                 // In single player, all players (even computer) get a keyword for consistency
-                keyword: getRandomKeyword() // Assign a keyword to each player
+                // PERBAIKAN: Hapus inisialisasi keyword acak di sini
+                // keyword: getRandomKeyword()
             });
         }
 
@@ -369,36 +388,77 @@ document.addEventListener('DOMContentLoaded', () => {
         }
 
         spPlayerTypeSelection.style.display = 'none';
-        assignRolesSinglePlayer();
-        startSinglePlayerGame();
+        // Hanya lanjutkan jika assignRolesSinglePlayer berhasil (mengembalikan true)
+        if (assignRolesSinglePlayer()) {
+            startSinglePlayerGame();
+        }
     }
 
+    // --- Game Logic Functions (Single Player) ---
     function assignRolesSinglePlayer() {
         const numPlayers = players.length;
         roles = [];
 
+        // Dynamic role assignment based on player count
         if (numPlayers >= 3 && numPlayers <= 5) {
             roles.push('Werewolf', 'Villager', 'Villager');
             if (numPlayers >= 4) roles.push('Doctor');
             if (numPlayers === 5) roles.push('Seer');
         } else if (numPlayers >= 6 && numPlayers <= 10) {
+            // PERBAIKAN: Tanda kurung siku penutup ']' yang benar
             roles.push('Werewolf', 'Werewolf', 'Villager', 'Villager', 'Villager', 'Doctor', 'Seer');
             if (numPlayers >= 8) roles.push('Villager');
             if (numPlayers >= 9) roles.push('Werewolf');
             if (numPlayers === 10) roles.push('Villager');
-        } else {
+        } else if (numPlayers > 10) {
             let numWerewolves = Math.floor(numPlayers / 4);
-            if (numWerewolves < 2) numWerewolves = 2; // Ensure at least 2 werewolves for larger games
+            if (numWerewolves < 2) numWerewolves = 2; // Min 2 werewolves for large games
             for (let i = 0; i < numWerewolves; i++) roles.push('Werewolf');
-            roles.push('Doctor', 'Seer');
+            roles.push('Doctor', 'Seer'); // Always include Doctor and Seer
             while (roles.length < numPlayers) {
-                roles.push('Villager');
+                roles.push('Villager'); // Fill remaining with Villagers
             }
+        } else {
+            alert('Minimal 3 pemain diperlukan untuk memulai permainan.');
+            return false;
         }
-        roles.sort(() => Math.random() - 0.5);
+
+        roles = shuffleArray(roles); // Shuffle roles before assigning
+
+        let commonGoodKeyword = '';
+        let werewolfKeyword = '';
+        let usedKeywordsForAssignment = [];
+
+        // Select keyword for Werewolf(s)
+        werewolfKeyword = getRandomKeyword(usedKeywordsForAssignment);
+        usedKeywordsForAssignment.push(werewolfKeyword);
+
+        // Select common keyword for good roles (Villager, Doctor, Seer)
+        commonGoodKeyword = getRandomKeyword(usedKeywordsForAssignment);
+        usedKeywordsForAssignment.push(commonGoodKeyword); // Add to used list
+
         players.forEach((player, index) => {
             player.role = roles[index];
+            if (player.role === 'Werewolf') {
+                player.keyword = werewolfKeyword;
+            } else { // Villager, Doctor, Seer
+                player.keyword = commonGoodKeyword;
+            }
         });
+
+        // Set the current player's role and keyword for display
+        // myPlayerId akan diset setelah humanPlayer ditemukan di startSinglePlayerGame
+        // Ini untuk memastikan display diupdate dengan peran dan keyword yang benar
+        const humanPlayer = players.find(p => p.type === 'human');
+        if (humanPlayer) {
+            myPlayerId = humanPlayer.id;
+            myRole = humanPlayer.role;
+            myKeyword = humanPlayer.keyword;
+        }
+
+
+        console.log("Assigned roles and keywords (Single Player):", players.map(p => ({name: p.name, role: p.role, keyword: p.keyword})));
+        return true; // Indicate success
     }
 
     function startSinglePlayerGame() {
@@ -409,9 +469,9 @@ document.addEventListener('DOMContentLoaded', () => {
 
         const humanPlayer = players.find(p => p.type === 'human');
         if (humanPlayer) {
-            myPlayerId = humanPlayer.id; // Set myPlayerId for single player (current user)
-            myRole = humanPlayer.role;
-            myKeyword = humanPlayer.keyword; // Get the assigned keyword for single player
+            // myPlayerId = humanPlayer.id; // Already set in assignRolesSinglePlayer
+            // myRole = humanPlayer.role;   // Already set in assignRolesSinglePlayer
+            // myKeyword = humanPlayer.keyword; // Already set in assignRolesSinglePlayer
             yourRoleDisplay.innerHTML = `Peranmu: <strong>${myRole}</strong><br>Kata Kunci: <strong>${myKeyword}</strong>`;
             addChatMessage(`Hai ${humanPlayer.name}, peranmu adalah: <strong>${myRole}</strong>.`, true);
             if (myRole === 'Werewolf') {
@@ -449,6 +509,7 @@ document.addEventListener('DOMContentLoaded', () => {
         addChatMessage('Waktunya voting. Pilih siapa yang ingin digantung!', true);
         const humanPlayer = players.find(p => p.isAlive && p.type === 'human');
         if (humanPlayer) {
+            // Target yang valid adalah pemain hidup selain diri sendiri
             createActionButtons(players.filter(p => p.isAlive && p.id !== humanPlayer.id), 'vote', 'Gantung', null);
         } else { // No human players, proceed with computer votes immediately
             setTimeout(() => {
