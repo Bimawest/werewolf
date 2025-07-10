@@ -17,8 +17,7 @@ body {
     width: 90%;
     max-width: 800px;
     text-align: center;
-    margin: 20px 0; /* Add vertical margin for small screens */
-}
+    margin: 20px 0; /* Add vertical margin for small screens */       }
 
 h1, h2, h3 {
     color: #333;
