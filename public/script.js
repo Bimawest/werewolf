@@ -693,6 +693,9 @@ document.addEventListener('DOMContentLoaded', () => {
         werewolfKillAnimation.innerHTML = `<img src="img/werewolf-kill.gif" alt="Werewolf Kill Animation">`;
         werewolfKillAnimation.style= `position: fixed; top: 0; left: 0; width: 100%; height: 100%; z-index: 1000; display: flex; justify-content: center; align-items: center; background-color: rgba(0, 0, 0, 0.8);`;
         document.body.appendChild(werewolfKillAnimation);
+        setTimeout(() => {
+            werewolfKillAnimation.remove(); // Remove after 3 seconds
+        }, 3000);
 
         // Only request actions from human players if they are alive and haven't acted
         if (humanWerewolf && !humanWerewolf.actionChosen) {
