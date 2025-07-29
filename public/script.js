@@ -1,4 +1,5 @@
-document.addEventListener('DOMContentLoaded', () => {                                       // --- DOM Elements ---
+document.addEventListener('DOMContentLoaded', () => {
+    // --- DOM Elements ---
     const modeSelectionScreen = document.getElementById('mode-selection-screen');
     const singlePlayerModeBtn = document.getElementById('single-player-mode-btn');
     const multiplayerModeBtn = document.getElementById('multiplayer-mode-btn');
@@ -13,14 +14,16 @@ document.addEventListener('DOMContentLoaded', () => {                           
     // Multiplayer Elements
     const mpLobbyScreen = document.getElementById('multiplayer-lobby-screen');
     const createRoomBtn = document.getElementById('create-room-btn');
-    const roomCodeInput = document.getElementById('room-code-input');                       const joinRoomBtn = document.getElementById('join-room-btn');
+    const roomCodeInput = document.getElementById('room-code-input');
+    const joinRoomBtn = document.getElementById('join-room-btn');
     const roomInfo = document.getElementById('room-info');
     const mpPlayerSetupScreen = document.getElementById('mp-player-setup-screen');
     const currentRoomCodeDisplay = document.getElementById('current-room-code-mp');
     const mpPlayerNameInput = document.getElementById('mp-player-name-input');
     const mpPlayerTypeSelect = document.getElementById('mp-player-type-select');
     const mpRegisterPlayerBtn = document.getElementById('mp-register-player-btn');
-    const mpStartGameServerBtn = document.getElementById('mp-start-game-server-btn');       const mpPlayersInRoomUl = document.getElementById('mp-players-in-room-ul');
+    const mpStartGameServerBtn = document.getElementById('mp-start-game-server-btn');
+    const mpPlayersInRoomUl = document.getElementById('mp-players-in-room-ul');
 
     // Add Seat elements
     const addSeatBtn = document.getElementById('add-seat-btn');
@@ -145,14 +148,14 @@ document.addEventListener('DOMContentLoaded', () => {                           
     }
 
     function showGameEnd(message) {
-    gameScreen.style.display = 'none';
-    gameOverScreen.style.display = 'block';
-    winnerDisplay.textContent = message;
-    addChatMessage('Permainan berakhir.');
-    // if (socket) {
-    //     socket.disconnect(); // Socket tidak lagi terputus otomatis saat game over
-    // }
-}
+        gameScreen.style.display = 'none';
+        gameOverScreen.style.display = 'block';
+        winnerDisplay.textContent = message;
+        addChatMessage('Permainan berakhir.');
+        // if (socket) {
+        //     socket.disconnect(); // Socket tidak lagi terputus otomatis saat game over
+        // }
+    }
 
     // --- Mode Selection ---
     singlePlayerModeBtn.addEventListener('click', () => {
@@ -188,7 +191,7 @@ document.addEventListener('DOMContentLoaded', () => {                           
 
         // --- Socket.IO Event Listeners (Multiplayer) ---
         socket.on('connect', () => {
-            addChatMessage(`Terhubung ke server sebagai ${socket.id.substring(0,4)}...`, true); // System message for connection
+            addChatMessage(`Terhubung ke server sebagai ${socket.id.substring(0, 4)}...`, true); // System message for connection
         });
 
         socket.on('disconnect', () => {
@@ -261,7 +264,7 @@ document.addEventListener('DOMContentLoaded', () => {                           
             addChatMessage('Game dimulai!');
             // Display initial role and keyword for the current player
             if (myRole && myKeyword) { // Will be updated by 'yourRole' event too
-                 yourRoleDisplay.innerHTML = `Peranmu: <strong>${myRole}</strong><br>Kata Kunci: <strong>${myKeyword}</strong>`;
+                yourRoleDisplay.innerHTML = `Peranmu: <strong>${myRole}</strong><br>Kata Kunci: <strong>${myKeyword}</strong>`;
             }
         });
 
@@ -276,7 +279,7 @@ document.addEventListener('DOMContentLoaded', () => {                           
             myKeyword = keyword; // Update the client-side keyword with the one from the server
             // Ensure the display is updated after both role and keyword are received
             if (myRole && myKeyword) {
-                 yourRoleDisplay.innerHTML = `Peranmu: <strong>${myRole}</strong><br>Kata Kunci: <strong>${myKeyword}</strong>`;
+                yourRoleDisplay.innerHTML = `Peranmu: <strong>${myRole}</strong><br>Kata Kunci: <strong>${myKeyword}</strong>`;
             }
         });
 
@@ -290,18 +293,18 @@ document.addEventListener('DOMContentLoaded', () => {                           
         });
 
         socket.on('updateGamePhase', (phaseText) => {
-        currentPhaseDisplay.textContent = `Fase: ${phaseText}`;
-        actionButtons.innerHTML = ''; // Clear action buttons from previous phase
+            currentPhaseDisplay.textContent = `Fase: ${phaseText}`;
+            actionButtons.innerHTML = ''; // Clear action buttons from previous phase
 
-        // Logika untuk mengubah background
-        if (phaseText.includes('Siang Hari')) { // Periksa teks fase untuk "Siang Hari"
-            document.body.classList.remove('night-mode');
-            document.body.classList.add('day-mode'); // Anda bisa menambah kelas 'day-mode' jika ingin gaya berbeda untuk siang
-        } else if (phaseText.includes('Malam Hari')) { // Periksa teks fase untuk "Malam Hari"
-            document.body.classList.add('night-mode');
-            document.body.classList.remove('day-mode');
-        }
-    });
+            // Logika untuk mengubah background
+            if (phaseText.includes('Siang Hari')) { // Periksa teks fase untuk "Siang Hari"
+                document.body.classList.remove('night-mode');
+                document.body.classList.add('day-mode'); // Anda bisa menambah kelas 'day-mode' jika ingin gaya berbeda untuk siang
+            } else if (phaseText.includes('Malam Hari')) { // Periksa teks fase untuk "Malam Hari"
+                document.body.classList.add('night-mode');
+                document.body.classList.remove('day-mode');
+            }
+        });
 
         socket.on('requestVote', (eligibleTargets) => {
             createActionButtons(eligibleTargets, 'vote', 'Gantung', 'submitVote');
@@ -406,6 +409,15 @@ document.addEventListener('DOMContentLoaded', () => {                           
         }
     }
 
+    // Helper function to shuffle an array
+    function shuffleArray(array) {
+        for (let i = array.length - 1; i > 0; i--) {
+            const j = Math.floor(Math.random() * (i + 1));
+            [array[i], array[j]] = [array[j], array[i]];
+        }
+        return array;
+    }
+
     // --- Game Logic Functions (Single Player) ---
     function assignRolesSinglePlayer() {
         const numPlayers = players.length;
@@ -469,7 +481,7 @@ document.addEventListener('DOMContentLoaded', () => {                           
         }
 
 
-        console.log("Assigned roles and keywords (Single Player):", players.map(p => ({name: p.name, role: p.role, keyword: p.keyword})));
+        console.log("Assigned roles and keywords (Single Player):", players.map(p => ({ name: p.name, role: p.role, keyword: p.keyword })));
         return true; // Indicate success
     }
 
@@ -675,6 +687,12 @@ document.addEventListener('DOMContentLoaded', () => {                           
         const humanWerewolf = players.find(p => p.isAlive && p.type === 'human' && p.role === 'Werewolf');
         const humanDoctor = players.find(p => p.isAlive && p.type === 'human' && p.role === 'Doctor');
         const humanSeer = players.find(p => p.isAlive && p.type === 'human' && p.role === 'Seer');
+        // Add animation when werewolf kills and stop animation after a short delay
+        const werewolfKillAnimation = document.createElement('div');
+        werewolfKillAnimation.className = 'werewolf-kill-animation';
+        werewolfKillAnimation.innerHTML = `<img src="img/werewolf-kill.gif" alt="Werewolf Kill Animation">`;
+        werewolfKillAnimation.style= `position: fixed; top: 0; left: 0; width: 100%; height: 100%; z-index: 1000; display: flex; justify-content: center; align-items: center; background-color: rgba(0, 0, 0, 0.8);`;
+        document.body.appendChild(werewolfKillAnimation);
 
         // Only request actions from human players if they are alive and haven't acted
         if (humanWerewolf && !humanWerewolf.actionChosen) {
@@ -721,7 +739,7 @@ document.addEventListener('DOMContentLoaded', () => {                           
         if (aliveComputerDoctors.length > 0) {
             // Doctor might try to protect a random player, or if human has selected, don't override
             if (!spDoctorProtectTarget) {
-                 const target = alivePlayers[Math.floor(Math.random() * alivePlayers.length)];
+                const target = alivePlayers[Math.floor(Math.random() * alivePlayers.length)];
                 spDoctorProtectTarget = target;
             }
             addChatMessage(`${aliveComputerDoctors[0].name} (Komputer Dokter) memilih untuk melindungi ${spDoctorProtectTarget.name}.`, false);
@@ -860,16 +878,16 @@ document.addEventListener('DOMContentLoaded', () => {                           
     });
 
     restartGameBtn.addEventListener('click', () => {
-    if (gameMode === 'multiplayer' && isHost) {
-        // Beri tahu server bahwa host ingin me-restart game
-        socket.emit('restartGame', currentRoomCode);
-    }
-    // Disconnect setelah restart game diinisiasi
-    if (socket) {
-        socket.disconnect(); // Baru putuskan koneksi di sini
-    }
-    location.reload(); // Muat ulang halaman setelah disconnect
-});
+        if (gameMode === 'multiplayer' && isHost) {
+            // Beri tahu server bahwa host ingin me-restart game
+            socket.emit('restartGame', currentRoomCode);
+        }
+        // Disconnect setelah restart game diinisiasi
+        if (socket) {
+            socket.disconnect(); // Baru putuskan koneksi di sini
+        }
+        location.reload(); // Muat ulang halaman setelah disconnect
+    });
 
     // --- Initial Display ---
     modeSelectionScreen.style.display = 'block';
