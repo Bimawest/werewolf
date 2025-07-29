@@ -1,8 +1,8 @@
-document.addEventListener('DOMContentLoaded', () => {
-    // --- DOM Elements ---
+document.addEventListener('DOMContentLoaded', () => {                                       // --- DOM Elements ---
     const modeSelectionScreen = document.getElementById('mode-selection-screen');
     const singlePlayerModeBtn = document.getElementById('single-player-mode-btn');
     const multiplayerModeBtn = document.getElementById('multiplayer-mode-btn');
+    const desiredRoomCodeInput = document.getElementById('desired-room-code-input');
 
     // Single Player Elements
     const spSetupScreen = document.getElementById('single-player-setup-screen');
@@ -13,16 +13,14 @@ document.addEventListener('DOMContentLoaded', () => {
     // Multiplayer Elements
     const mpLobbyScreen = document.getElementById('multiplayer-lobby-screen');
     const createRoomBtn = document.getElementById('create-room-btn');
-    const roomCodeInput = document.getElementById('room-code-input');
-    const joinRoomBtn = document.getElementById('join-room-btn');
+    const roomCodeInput = document.getElementById('room-code-input');                       const joinRoomBtn = document.getElementById('join-room-btn');
     const roomInfo = document.getElementById('room-info');
     const mpPlayerSetupScreen = document.getElementById('mp-player-setup-screen');
     const currentRoomCodeDisplay = document.getElementById('current-room-code-mp');
     const mpPlayerNameInput = document.getElementById('mp-player-name-input');
     const mpPlayerTypeSelect = document.getElementById('mp-player-type-select');
     const mpRegisterPlayerBtn = document.getElementById('mp-register-player-btn');
-    const mpStartGameServerBtn = document.getElementById('mp-start-game-server-btn');
-    const mpPlayersInRoomUl = document.getElementById('mp-players-in-room-ul');
+    const mpStartGameServerBtn = document.getElementById('mp-start-game-server-btn');       const mpPlayersInRoomUl = document.getElementById('mp-players-in-room-ul');
 
     // Add Seat elements
     const addSeatBtn = document.getElementById('add-seat-btn');
@@ -173,6 +171,11 @@ document.addEventListener('DOMContentLoaded', () => {
         modeSelectionScreen.style.display = 'none';
         mpLobbyScreen.style.display = 'block';
 
+        // Pastikan input custom room code terlihat saat di lobi multiplayer
+        desiredRoomCodeInput.value = ''; // Kosongkan input setiap kali masuk lobi
+        desiredRoomCodeInput.style.display = 'block'; // Tampilkan input
+        document.querySelector('label[for="desired-room-code-input"]').style.display = 'block'; // Tampilkan labelnya
+
         // IMPORTANT: Change this URL to your ngrok URL or deployed server URL when in production!
         // For local development, use 'http://localhost:3000'.
         // If deployed to a cloud platform, use its public URL.
@@ -287,9 +290,18 @@ document.addEventListener('DOMContentLoaded', () => {
         });
 
         socket.on('updateGamePhase', (phaseText) => {
-            currentPhaseDisplay.textContent = `Fase: ${phaseText}`;
-            actionButtons.innerHTML = ''; // Clear action buttons from previous phase
-        });
+        currentPhaseDisplay.textContent = `Fase: ${phaseText}`;
+        actionButtons.innerHTML = ''; // Clear action buttons from previous phase
+
+        // Logika untuk mengubah background
+        if (phaseText.includes('Siang Hari')) { // Periksa teks fase untuk "Siang Hari"
+            document.body.classList.remove('night-mode');
+            document.body.classList.add('day-mode'); // Anda bisa menambah kelas 'day-mode' jika ingin gaya berbeda untuk siang
+        } else if (phaseText.includes('Malam Hari')) { // Periksa teks fase untuk "Malam Hari"
+            document.body.classList.add('night-mode');
+            document.body.classList.remove('day-mode');
+        }
+    });
 
         socket.on('requestVote', (eligibleTargets) => {
             createActionButtons(eligibleTargets, 'vote', 'Gantung', 'submitVote');
@@ -494,6 +506,8 @@ document.addEventListener('DOMContentLoaded', () => {
         currentPhaseDisplay.textContent = 'Fase: Siang Hari (Diskusi & Voting)';
         addChatMessage('Ini adalah siang hari. Diskusikan siapa yang mencurigakan.', true);
         actionButtons.innerHTML = '';
+        document.body.classList.remove('night-mode');
+        document.body.classList.add('day-mode'); // Pastikan ini juga di set di single player
 
         players.forEach(p => {
             p.hasVoted = false;
@@ -645,6 +659,8 @@ document.addEventListener('DOMContentLoaded', () => {
         currentPhaseDisplay.textContent = 'Fase: Malam Hari (Aksi Peran)';
         addChatMessage('Ini adalah malam hari. Werewolf berburu, Dokter melindungi, dan Seer melihat.', true);
         actionButtons.innerHTML = '';
+        document.body.classList.add('night-mode');
+        document.body.classList.remove('day-mode'); // Pastikan ini juga di set di single player
 
         spWerewolfKillTarget = null;
         spDoctorProtectTarget = null;
@@ -765,7 +781,9 @@ document.addEventListener('DOMContentLoaded', () => {
 
     // --- Multiplayer UI Event Listeners ---
     createRoomBtn.addEventListener('click', () => {
-        socket.emit('createRoom');
+        const customRoomCode = desiredRoomCodeInput.value.trim().toUpperCase();
+        // Kirim kode kustom ke server. Jika kosong, server akan meng-generate sendiri.
+        socket.emit('createRoom', customRoomCode);
     });
 
     joinRoomBtn.addEventListener('click', () => {
@@ -861,4 +879,6 @@ document.addEventListener('DOMContentLoaded', () => {
     gameScreen.style.display = 'none';
     gameOverScreen.style.display = 'none';
     addSeatModal.style.display = 'none'; // Ensure modal is hidden on load
+
+    document.body.classList.remove('night-mode'); // Default to day mode on load
 });
