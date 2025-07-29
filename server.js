@@ -1,4 +1,5 @@
-const express = require('express');                                                     const http = require('http');
+const express = require('express');
+const http = require('http');
 const socketIo = require('socket.io');
 const path = require('path');
 
@@ -15,21 +16,48 @@ app.use(express.static(path.join(__dirname, 'public')));
 const rooms = {}; // Structure: { 'ROOMCODE': { hostSocketId: '...', players: [], gameState: {} } }
 
 // Keywords for the game (roles based on player count)
-const keywords = [
-    "Apel", "Buku", "Kursi", "Meja", "Pohon", "Rumah", "Mobil", "Sungai", "Gunung", "Bunga",
-    "Kopi", "Teh", "Gajah", "Harimau", "Lampu", "Kunci", "Jendela", "Pintu", "Kereta", "Pesawat"                                                                                ];
+const keywordPairs = [
+    ["Meja", "laci"],
+    ["Siang", "Matahari"],
+    ["Hutan", "Desa"],
+    ["Bintang", "Bulan"],
+    ["Kucing", "Anjing"],
+    ["Mobil", "Kereta"],
+    ["Kayu", "Pohon"],
+    ["Adonan", "Kue"],
+    ["Kunci", "Gembok"],
+    ["Buku", "Pulpen"],
+    ["Hujan", "Basah"],
+    ["Kopi", "Gula"],
+    ["Susu", "Cokelat"],
+    ["Sabun", "Sahampo"],
+    ["Kapal", "Laut"],
+    ["Burung", "Sarang"],
+    ["Bunga", "Tanah"],
+    ["Awan", "Langit"],
+    ["Gunung", "Lembah"],
+    ["Cinta", "Benci"],
+    ["Kabel", "Selang"],
+    ["Pintu", "Jendela"]
+];
 
 // Helper Functions
-function getRandomKeyword(usedKeywords = []) {
-    let availableKeywords = keywords.filter(k => !usedKeywords.includes(k));
-    if (availableKeywords.length === 0) {
-        console.warn("Tidak ada kata kunci unik yang tersisa. Menggunakan kembali kata kunci.");
-        // Fallback: If no unique keywords left, just pick one randomly from all
-        return keywords[Math.floor(Math.random() * keywords.length)];
+// Mengubah getRandomKeyword untuk mengembalikan pasangan keyword
+function getRandomKeywordPair(usedPairIndices = []) {
+    let availablePairs = keywordPairs.filter((_, index) => !usedPairIndices.includes(index));
+
+    if (availablePairs.length === 0) {
+        console.warn("Tidak ada pasangan kata kunci unik yang tersisa. Menggunakan kembali pasangan kata kunci.");
+        // Fallback: Jika tidak ada pasangan unik tersisa, pilih acak dari semua pasangan
+        const fallbackIndex = Math.floor(Math.random() * keywordPairs.length);
+        return { pair: keywordPairs[fallbackIndex], index: fallbackIndex };
     }
-    const randomIndex = Math.floor(Math.random() * availableKeywords.length);
-    const keyword = availableKeywords[randomIndex];
-    return keyword;
+
+    const randomIndex = Math.floor(Math.random() * availablePairs.length);
+    const selectedPair = availablePairs[randomIndex];
+    const originalIndex = keywordPairs.findIndex(pair => pair[0] === selectedPair[0] && pair[1] === selectedPair[1]); // Find original index
+
+    return { pair: selectedPair, index: originalIndex };
 }
 
 // Helper function to generate a random room code
@@ -71,24 +99,23 @@ function assignRoles(roomCode) {
     const numPlayers = room.players.length;
     let rolesToAssign = [];
 
-    // Role assignment logic based on number of players
+    // ... (Logika penugasan peran sesuai jumlah pemain Anda, tidak berubah) ...
     if (numPlayers >= 3 && numPlayers <= 5) {
         rolesToAssign = ['Werewolf', 'Villager', 'Villager'];
         if (numPlayers >= 4) rolesToAssign.push('Doctor');
         if (numPlayers === 5) rolesToAssign.push('Seer');
     } else if (numPlayers >= 6 && numPlayers <= 10) {
-        // PERBAIKAN: Tanda kurung siku penutup ']' yang benar
         rolesToAssign = ['Werewolf', 'Werewolf', 'Villager', 'Villager', 'Villager', 'Doctor', 'Seer'];
         if (numPlayers >= 8) rolesToAssign.push('Villager');
         if (numPlayers >= 9) rolesToAssign.push('Werewolf');
         if (numPlayers === 10) rolesToAssign.push('Villager');
-    } else if (numPlayers > 10) { // For more than 10 players, dynamic assignment
+    } else if (numPlayers > 10) {
         let numWerewolves = Math.floor(numPlayers / 4);
-        if (numWerewolves < 2) numWerewolves = 2; // Minimum 2 werewolves for large games
+        if (numWerewolves < 2) numWerewolves = 2;
         for (let i = 0; i < numWerewolves; i++) rolesToAssign.push('Werewolf');
-        rolesToAssign.push('Doctor', 'Seer'); // Always include Doctor and Seer
+        rolesToAssign.push('Doctor', 'Seer');
         while (rolesToAssign.length < numPlayers) {
-            rolesToAssign.push('Villager'); // Fill remaining with Villagers
+            rolesToAssign.push('Villager');
         }
     } else {
         console.warn(`Attempted to assign roles for ${numPlayers} players in room ${roomCode}. Minimum 3 required.`);
@@ -98,29 +125,24 @@ function assignRoles(roomCode) {
 
     rolesToAssign = shuffleArray(rolesToAssign); // Shuffle roles before assigning
 
-    let commonGoodKeyword = '';
-    let werewolfKeyword = '';
-    let usedKeywordsForAssignment = [];
+    let usedKeywordPairIndices = [];
+    const { pair: selectedKeywordPair, index: pairIndex } = getRandomKeywordPair(usedKeywordPairIndices);
+    usedKeywordPairIndices.push(pairIndex); // Menandai pasangan keyword sebagai sudah digunakan
 
-    // Select keyword for Werewolf(s)
-    werewolfKeyword = getRandomKeyword(usedKeywordsForAssignment);
-    usedKeywordsForAssignment.push(werewolfKeyword);
-
-    // Select common keyword for good roles (Villager, Doctor, Seer)
-    commonGoodKeyword = getRandomKeyword(usedKeywordsForAssignment);
-    usedKeywordsForAssignment.push(commonGoodKeyword); // Add to used list
+    const werewolfKeyword = selectedKeywordPair[0]; // Kata kunci pertama untuk Werewolf
+    const goodRolesKeyword = selectedKeywordPair[1]; // Kata kunci kedua untuk peran baik
 
     room.players.forEach((player, index) => {
         player.role = rolesToAssign[index];
         if (player.role === 'Werewolf') {
             player.keyword = werewolfKeyword;
         } else { // Villager, Doctor, Seer
-            player.keyword = commonGoodKeyword;
+            player.keyword = goodRolesKeyword;
         }
     });
 
+    // ... (Bagian pengiriman peran dan kata kunci ke klien, tidak berubah) ...
     room.players.forEach((player) => {
-        // Send individual role and keyword to each human player
         if (player.type === 'human' && player.socketId) {
             io.to(player.socketId).emit('yourRole', player.role);
             io.to(player.socketId).emit('yourKeyword', player.keyword); // Send individual keyword
@@ -128,16 +150,14 @@ function assignRoles(roomCode) {
                 const werewolfBuddies = room.players
                     .filter(p => p.role === 'Werewolf' && p.id !== player.id && p.isAlive)
                     .map(p => p.name);
-                // For werewolves, also send buddies and the shared werewolf keyword
                 io.to(player.socketId).emit('werewolfBuddies', werewolfBuddies, player.keyword);
             }
         }
-        // For AI players, their role and keyword are already set on the server-side player object
     });
 
     room.gameState.rolesAssigned = true;
-    room.gameState.dayCount = 0; // Reset day count for new game
-    room.gameState.phase = 'day'; // Start with day phase
+    room.gameState.dayCount = 0;
+    room.gameState.phase = 'day';
 
     console.log(`Roles and Keywords assigned for room ${roomCode}:`, room.players.map(p => ({ name: p.name, role: p.role, keyword: p.keyword })));
     addSystemMessage(roomCode, 'Peran dan Kata Kunci telah dibagikan. Selamat bermain!');
@@ -235,7 +255,7 @@ function startDayPhase(roomCode) {
                 } catch (timeoutError) {
                     console.error(`[ERROR] Timeout callback for day phase in room ${roomCode} failed:`, timeoutError);
                 }
-            }, 10000); // Give 10 seconds for human players to vote, then computers vote
+            }, 150000); // Give 2 ½ minutes for human players to vote, then computers vote
         }
     } catch (error) {
         console.error(`[ERROR] startDayPhase for room ${roomCode} failed:`, error);
@@ -401,7 +421,7 @@ function startNightPhase(roomCode) {
             } catch (timeoutError) {
                 console.error(`[ERROR] Timeout callback for night phase in room ${roomCode} failed:`, timeoutError);
             }
-        },15000); // Give 5 seconds for human players to make night actions
+        }, 60000); // Give 1 minute for human players to make night actions
     } catch (error) {
         console.error(`[ERROR] startNightPhase for room ${roomCode} failed:`, error);
         addSystemMessage(roomCode, `Terjadi kesalahan internal saat memulai malam hari.`);
@@ -457,14 +477,26 @@ function resolveNightActions(roomCode) {
         if (room.gameState.werewolfKillTarget) {
             const targetPlayer = room.players.find(p => p.id === room.gameState.werewolfKillTarget.id);
 
+            // --- Tambahkan logika probabilitas di sini ---
+            const killChance = 0.15; // 15% kesempatan
+            const randomNumber = Math.random(); // Menghasilkan angka antara 0 (inklusif) dan 1 (eksklusif)
+
+            if (randomNumber <= killChance) { // Jika angka acak kurang dari atau sama dengan 0.15, pembunuhan berhasil
             if (targetPlayer && room.gameState.doctorProtectTarget && targetPlayer.id === room.gameState.doctorProtectTarget.id) {
                 addSystemMessage(roomCode, `Malam ini ${targetPlayer.name} diserang Werewolf tapi diselamatkan oleh Dokter.`);
             } else if (targetPlayer) {
                 killedPlayer = targetPlayer;
                 killedPlayer.isAlive = false;
                 room.gameState.deadPlayersQueue.push(killedPlayer);
+                addSystemMessage(roomCode, `Malam ini, ${killedPlayer.name} dimangsa oleh Werewolf.`);
             }
-        }
+        }else {
+        // Pembunuhan gagal karena probabilitas
+        addSystemMessage(roomCode, `Werewolf mencoba memangsa ${targetPlayer.name} tapi gagal malam ini.`);
+    }
+} else {
+    addSystemMessage(roomCode, 'Tidak ada yang dimangsa malam ini.');
+}
 
         checkGameEnd(roomCode);
         if (room.gameState.phase === 'night') { // If game not over
@@ -528,9 +560,25 @@ io.on('connection', (socket) => {
     console.log(`User connected: ${socket.id}`);
 
     // --- Room Management ---
-    socket.on('createRoom', () => {
+    // Ubah parameter event 'createRoom' untuk menerima 'customRoomCode'
+    socket.on('createRoom', (customRoomCode) => {
         try {
-            const roomCode = generateRoomCode();
+            let roomCode;
+            // Jika customRoomCode diberikan dan belum ada di rooms
+            if (customRoomCode && !rooms[customRoomCode]) {
+                roomCode = customRoomCode;
+                console.log(`Host requested custom room code: ${customRoomCode}`);
+            } else if (customRoomCode && rooms[customRoomCode]) {
+                // Jika host mencoba kode yang sudah ada
+                socket.emit('actionError', `Kode ruangan "${customRoomCode}" sudah digunakan. Silakan coba kode lain atau biarkan kosong untuk di-generate otomatis.`);
+                console.log(`Host ${socket.id} tried to create room with existing code: ${customRoomCode}`);
+                return; // Hentikan proses pembuatan ruangan
+            } else {
+                // Jika customRoomCode kosong atau tidak valid, generate otomatis
+                roomCode = generateRoomCode();
+                console.log(`No custom room code provided or invalid, generating: ${roomCode}`);
+            }
+
             rooms[roomCode] = {
                 hostSocketId: socket.id,
                 players: [], // { id, name, type, role, isAlive, socketId }
@@ -539,7 +587,7 @@ io.on('connection', (socket) => {
             socket.join(roomCode);
             socket.emit('roomCreated', roomCode);
             console.log(`Room created: ${roomCode} by ${socket.id}`);
-            addSystemMessage(roomCode, `Ruangan ${roomCode} dibuat oleh host.`);
+            addSystemMessage(roomCode, `Ruangan **${roomCode}** dibuat oleh host.`);
             io.to(roomCode).emit('updatePlayerList', getPublicPlayers(roomCode)); // Send initial player list
         } catch (error) {
             console.error(`[ERROR] createRoom failed for socket ${socket.id}:`, error);
@@ -737,7 +785,7 @@ io.on('connection', (socket) => {
             werewolf.actionChosen = true;
             room.gameState.werewolfKillTarget = target;
             io.to(socket.id).emit('actionSubmitted');
-            addSystemMessage(roomCode, `${werewolf.name} telah memilih mangsa.`);
+            addSystemMessage(roomCode, `werewolf telah memilih mangsa.`);
 
             const allHumanSpecialRolesActed = room.players.filter(p => p.isAlive && p.type === 'human' && ['Werewolf', 'Doctor', 'Seer'].includes(p.role))
                 .every(p => p.actionChosen);
@@ -782,7 +830,7 @@ io.on('connection', (socket) => {
             doctor.actionChosen = true;
             room.gameState.doctorProtectTarget = target;
             io.to(socket.id).emit('actionSubmitted');
-            addSystemMessage(roomCode, `${doctor.name} telah memilih untuk melindungi.`);
+            addSystemMessage(roomCode, `doctor telah memilih untuk melindungi.`);
 
             const allHumanSpecialRolesActed = room.players.filter(p => p.isAlive && p.type === 'human' && ['Werewolf', 'Doctor', 'Seer'].includes(p.role))
                 .every(p => p.actionChosen);
@@ -826,7 +874,7 @@ io.on('connection', (socket) => {
             seer.actionChosen = true;
             io.to(socket.id).emit('actionSubmitted');
             io.to(socket.id).emit('newChatMessage', `<span style="color: #666;">[Sistem]</span> Peran **${target.name}** adalah **${target.role}**.`);
-            addSystemMessage(roomCode, `${seer.name} telah melihat peran seseorang.`);
+            addSystemMessage(roomCode, `seer telah melihat peran seseorang.`);
 
             const allHumanSpecialRolesActed = room.players.filter(p => p.isAlive && p.type === 'human' && ['Werewolf', 'Doctor', 'Seer'].includes(p.role))
                 .every(p => p.actionChosen);
