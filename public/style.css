@@ -9,6 +9,96 @@ body {
     box-sizing: border-box; /* Add this for consistent sizing */
 }
 
+/* Warna latar untuk phase */
+
+body.night-mode {
+    background-color: #333; /* Warna gelap untuk malam */
+    color: #f0f0f0; /* Ubah warna teks agar terlihat di latar belakang gelap */
+}
+
+/* Anda mungkin juga ingin menyesuaikan warna elemen lain agar cocok dengan mode malam */                                                             body.night-mode .container {
+    background-color: #444; /* Container juga sedikit lebih gelap */
+    box-shadow: 0 4px 12px rgba(0, 0, 0, 0.3);
+}
+
+body.night-mode h1,
+body.night-mode h2,
+body.night-mode h3 {
+    color: #eee;
+}
+
+body.night-mode .chat-message {
+    background-color: #555;
+    border-color: #666;
+}
+
+body.night-mode .chat-message strong {
+    color: #99ccff; /* Warna untuk nama pengirim di mode malam */
+}
+
+body.night-mode .chat-message span[style*="color: #666"] {
+    color: #bbb !important; /* System message */
+}
+
+body.night-mode button {
+    background-color: #5cb85c; /* Warna tombol yang berbeda di mode malam */
+}
+
+body.night-mode button:hover {
+    background-color: #4cae4c;
+}
+
+body.night-mode .disabled-button {
+    background-color: #777;
+}
+
+body.night-mode #action-buttons {
+    background-color: #555;
+}
+
+body.night-mode #player-list ul,
+body.night-mode #mp-players-in-room-ul,
+body.night-mode #chat-messages {
+    border-color: #666;
+    background-color: #555;
+}
+
+body.night-mode #player-list li,
+body.night-mode #mp-players-in-room-ul li {
+    border-bottom-color: #666;
+}
+
+/* Style for dead players in night mode */
+body.night-mode #players-ul li.dead,
+body.night-mode #mp-players-in-room-ul li.dead {
+    background-color: #6a3d42; /* Darker red for dead in night mode */
+}
+
+/* Style for the current player in night mode */
+body.night-mode #players-ul li.is-me,
+body.night-mode #mp-players-in-room-ul li.is-me {
+    background-color: #3d6a80; /* Darker blue background */
+    border-left-color: #6aa8df; /* Lighter blue left border */
+}
+
+body.night-mode input[type="number"],
+body.night-mode input[type="text"],
+body.night-mode select {
+    background-color: #666;
+    color: #eee;
+    border-color: #777;
+}
+
+body.night-mode .modal-content {
+    background-color: #555;
+    border-color: #777;
+    box-shadow: 0 5px 15px rgba(0,0,0,0.5);
+}
+
+body.night-mode .modal-content h3 {
+    color: #eee;
+}
+
 .container {
     background-color: #ffffff;
     padding: 30px;
@@ -17,7 +107,8 @@ body {
     width: 90%;
     max-width: 800px;
     text-align: center;
-    margin: 20px 0; /* Add vertical margin for small screens */       }
+    margin: 20px 0; /* Add vertical margin for small screens */
+}
 
 h1, h2, h3 {
     color: #333;
