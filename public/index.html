@@ -14,7 +14,20 @@
             <button id="single-player-mode-btn">Main Single Player</button>
             <button id="multiplayer-mode-btn">Main Multiplayer</button>
         </div>
-                                                                              <div id="single-player-setup-screen" style="display: none;">
+
+        <div id="multiplayer-lobby-screen" style="display: none;">
+    <h2>Multiplayer</h2>
+    <label for="desired-room-code-input">Buat Kode Ruangan Kustom (Opsional):</label>
+    <input type="text" id="desired-room-code-input" placeholder="Misal: WEREWOLF123">
+    <button id="create-room-btn">Buat Ruangan Baru</button>
+    <div>
+        <input type="text" id="room-code-input" placeholder="Kode Ruangan">
+        <button id="join-room-btn">Gabung Ruangan</button>
+    </div>
+    <p id="room-info"></p>
+</div>
+
+        <div id="single-player-setup-screen" style="display: none;">
             <h2>Setup Single Player</h2>
             <label for="sp-num-players">Jumlah Pemain (3-20):</label>
             <input type="number" id="sp-num-players" min="3" max="20" value="5">
