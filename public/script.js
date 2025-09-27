@@ -687,15 +687,6 @@ document.addEventListener('DOMContentLoaded', () => {
         const humanWerewolf = players.find(p => p.isAlive && p.type === 'human' && p.role === 'Werewolf');
         const humanDoctor = players.find(p => p.isAlive && p.type === 'human' && p.role === 'Doctor');
         const humanSeer = players.find(p => p.isAlive && p.type === 'human' && p.role === 'Seer');
-        // Add animation when werewolf kills and stop animation after a short delay
-        const werewolfKillAnimation = document.createElement('div');
-        werewolfKillAnimation.className = 'werewolf-kill-animation';
-        werewolfKillAnimation.innerHTML = `<img src="img/werewolf-kill.gif" alt="Werewolf Kill Animation">`;
-        werewolfKillAnimation.style= `position: fixed; top: 0; left: 0; width: 100%; height: 100%; z-index: 1000; display: flex; justify-content: center; align-items: center; background-color: rgba(0, 0, 0, 0.8);`;
-        document.body.appendChild(werewolfKillAnimation);
-        setTimeout(() => {
-            werewolfKillAnimation.remove(); // Remove after 3 seconds
-        }, 3000);
 
         // Only request actions from human players if they are alive and haven't acted
         if (humanWerewolf && !humanWerewolf.actionChosen) {
@@ -770,18 +761,42 @@ document.addEventListener('DOMContentLoaded', () => {
                 if (killedPlayer) {
                     killedPlayer.isAlive = false;
                     addChatMessage(`Malam ini, <strong>${killedPlayer.name}</strong> dimangsa oleh Werewolf. Perannya adalah <strong>${killedPlayer.role}</strong>.`, true);
-                }
+                    // Add animation when werewolf kills and stop animation after a short delay
+const werewolfKillAnimation = document.createElement('div');
+werewolfKillAnimation.className = 'werewolf-kill-animation';
+werewolfKillAnimation.innerHTML = `
+    <img src="img/werewolf-kill.gif" alt="Werewolf Kill Animation" style="position: relative; z-index: 1;">
+    <img src="img/text.png" alt="Overlay Text" style="position: absolute; z-index: 2; width: 90%; height: auto;">
+`;
+werewolfKillAnimation.style = `
+    position: fixed;
+    top: 0;
+    left: 0;
+    width: 100%;
+    height: 100%;
+    z-index: 1000;
+    display: flex;
+    justify-content: center;
+    align-items: center;
+    background-color: rgba(0, 0, 0, 0.8);
+`;
+document.body.appendChild(werewolfKillAnimation);
+setTimeout(() => {
+    werewolfKillAnimation.remove(); // Remove after 3 seconds
+}, 3000);
             }
-        } else {
-            addChatMessage('Tidak ada yang dimangsa malam ini.', true);
         }
-
-        updatePlayerListUI(players, playersUl);
-        checkSinglePlayerGameEnd();
-        if (gameScreen.style.display === 'block') { // If game not over
-            setTimeout(startDayPhaseSinglePlayer, 3000);
-        }
+    } else {
+        addChatMessage('Tidak ada yang dimangsa malam ini.', true);
     }
+
+    updatePlayerListUI(players, playersUl);
+    checkSinglePlayerGameEnd();
+    if (gameScreen.style.display === 'block') { // If game not over
+        setTimeout(startDayPhaseSinglePlayer, 3000);
+    }
+}
+
 
     function checkSinglePlayerGameEnd() {
         const aliveWerewolves = players.filter(p => p.isAlive && p.role === 'Werewolf');
